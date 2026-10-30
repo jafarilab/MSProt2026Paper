@@ -30,102 +30,756 @@ library("ggcorrplot")
 ```
 
 # Data
+## First time
+```{r import_and_cache_dia, message=FALSE, warning=FALSE}
 
-```{r, include=TRUE, echo=TRUE, eval=FALSE, message=FALSE}
-library("BiocFileCache")
+# ============================================================
+# 1. File paths and cache directory
+# ============================================================
 
-bfc <- BiocFileCache()
-precursorFile <- bfcrpath(bfc,"https://github.com/statOmics/msqrob2data/raw/refs/heads/main/dia/spikeinStaes/spikein248-staesetal2024.parquet") 
+file_alpha <- "/Users/nvd448/Documents/MSProt2026/Search_outputs/AlphaDIA/precursor.matrix.tsv"
 
-precursors <- arrow::read_parquet(precursorFile) # function from the arrow package
-#precursors <- data.table::fread(precursorFile) # For older versions of DIA-NN, where the results are stored as tsv files. Note that the precursorFile then would point to "report.tsv" 
+file_diann <- "/Users/nvd448/Documents/MSProt2026/Search_outputs/DIANN/Team2_DIA-NN_identification_results/Team2_DIA-NN_report.pr_matrix.tsv"
+
+file_spectronaut <- "/Users/nvd448/Documents/MSProt2026/Search_outputs/Spectronaut/FilteredCleaned_Spectronaut_Report.RDS"
+
+file_maxdia <- "/Users/nvd448/Documents/MSProt2026/Search_outputs/MaxQuant/Team4_MaxDIA_evidence.txt"
+
+cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
+
+dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ============================================================
+# 2. AlphaDIA — preserve precursor hashes as character
+# ============================================================
+
+alpha_cache <- file.path(cache_dir, "alpha_raw_character_hash.rds")
+
+if (file.exists(alpha_cache)) {
+
+  alpha_raw <- readRDS(alpha_cache)
+
+} else {
+
+  alpha_raw <- readr::read_tsv(
+    file_alpha,
+    col_types = readr::cols(
+      precursor.mod_seq_charge_hash = readr::col_character(),
+      .default = readr::col_guess()
+    ),
+    show_col_types = FALSE
+  )
+
+  saveRDS(alpha_raw, alpha_cache, compress = FALSE)
+}
+
+# ============================================================
+# 3. DIA-NN — original wide matrix
+# ============================================================
+
+diann_cache <- file.path(cache_dir, "diann_raw.rds")
+
+if (file.exists(diann_cache)) {
+
+  diann_raw <- readRDS(diann_cache)
+
+} else {
+
+  diann_raw <- readr::read_tsv(
+    file_diann,
+    show_col_types = FALSE
+  )
+
+  saveRDS(diann_raw, diann_cache, compress = FALSE)
+}
+
+# ============================================================
+# 4. Spectronaut — already saved as RDS
+# ============================================================
+
+spectronaut_raw <- readRDS(file_spectronaut)
+
+# ============================================================
+# 5. MaxDIA — import essential columns with explicit types
+# ============================================================
+
+maxdia_cache <- file.path(cache_dir, "maxdia_selected_typed.rds")
+
+if (file.exists(maxdia_cache)) {
+
+  maxdia_raw <- readRDS(maxdia_cache)
+
+} else {
+
+  maxdia_header <- names(
+    readr::read_tsv(
+      file_maxdia,
+      n_max = 0,
+      show_col_types = FALSE
+    )
+  )
+
+  keep_cols <- c(
+    "Raw file",
+    "Modified sequence",
+    "Sequence",
+    "Charge",
+    "Leading proteins",
+    "Proteins",
+    "Intensity",
+    "Q-value",
+    "PEP",
+    "Reverse",
+    "Potential contaminant",
+    "DIA evidence type"
+  )
+
+  missing_cols <- setdiff(keep_cols, maxdia_header)
+
+  if (length(missing_cols) > 0) {
+    stop(
+      "Missing MaxDIA columns: ",
+      paste(missing_cols, collapse = ", ")
+    )
+  }
+
+  column_spec <- readr::cols(
+    .default = readr::col_skip(),
+
+    `Raw file` = readr::col_character(),
+    `Modified sequence` = readr::col_character(),
+    Sequence = readr::col_character(),
+    Charge = readr::col_integer(),
+    `Leading proteins` = readr::col_character(),
+    Proteins = readr::col_character(),
+    Intensity = readr::col_double(),
+    `Q-value` = readr::col_double(),
+    PEP = readr::col_double(),
+    Reverse = readr::col_character(),
+    `Potential contaminant` = readr::col_character(),
+    `DIA evidence type` = readr::col_character()
+  )
+
+  maxdia_raw <- readr::read_tsv(
+    file_maxdia,
+    col_types = column_spec,
+    show_col_types = FALSE
+  )
+
+  saveRDS(maxdia_raw, maxdia_cache, compress = FALSE)
+}
+
+# ============================================================
+# 6. Verify imported datasets
+# ============================================================
+
+import_summary <- tibble(
+  Software = c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA"),
+  Rows = c(
+    nrow(alpha_raw),
+    nrow(diann_raw),
+    nrow(spectronaut_raw),
+    nrow(maxdia_raw)
+  ),
+  Columns = c(
+    ncol(alpha_raw),
+    ncol(diann_raw),
+    ncol(spectronaut_raw),
+    ncol(maxdia_raw)
+  )
+)
+
+print(import_summary)
+
+# Verify identifier types
+class(alpha_raw$precursor.mod_seq_charge_hash)
+class(diann_raw$Precursor.Id)
+class(spectronaut_raw$EG.PrecursorId)
+class(maxdia_raw$`Modified sequence`)
+
 ```
 
-Each row in the precursor data table is in “long format” and contains information about one precursor in a specific run. Then, we filter the data to reduce the memory footprint. We known the ground truth: UPS proteins are differentially abundant (DA, spiked in), Yeast proteins are not.
-```{r}
-precursors <- precursors |> 
+## Recovery
+```{r reload_cached_data}
+# ============================================================
+# Reload all four datasets after an R crash
+# ============================================================
+
+cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
+
+# Check that all required files exist
+cache_files <- c(
+  AlphaDIA = file.path(cache_dir, "alpha_raw_character_hash.rds"),
+  DIANN = file.path(cache_dir, "diann_raw.rds"),
+  Spectronaut = "/Users/nvd448/Documents/MSProt2026/Search_outputs/Spectronaut/FilteredCleaned_Spectronaut_Report.RDS",
+  MaxDIA = file.path(cache_dir, "maxdia_selected_typed.rds")
+)
+
+if (!all(file.exists(cache_files))) {
+  stop(
+    "Missing files: ",
+    paste(names(cache_files)[!file.exists(cache_files)], collapse = ", ")
+  )
+}
+
+# Reload datasets
+alpha_raw <- readRDS(cache_files["AlphaDIA"])
+diann_raw <- readRDS(cache_files["DIANN"])
+spectronaut_raw <- readRDS(cache_files["Spectronaut"])
+maxdia_raw <- readRDS(cache_files["MaxDIA"])
+
+# Verify successful loading
+reload_summary <- tibble(
+  Software = names(cache_files),
+  Rows = c(
+    nrow(alpha_raw),
+    nrow(diann_raw),
+    nrow(spectronaut_raw),
+    nrow(maxdia_raw)
+  ),
+  Columns = c(
+    ncol(alpha_raw),
+    ncol(diann_raw),
+    ncol(spectronaut_raw),
+    ncol(maxdia_raw)
+  )
+)
+
+print(reload_summary)
+```
+
+## Inspect the imported datasets
+```{r inspect_datasets}
+# Inspect object classes without creating a large data list
+data.frame(
+  Software = c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA"),
+  Class = c(
+    paste(class(alpha_raw), collapse = ", "),
+    paste(class(diann_raw), collapse = ", "),
+    paste(class(spectronaut_raw), collapse = ", "),
+    paste(class(maxdia_raw), collapse = ", ")
+  ),
+  Rows = c(
+    nrow(alpha_raw),
+    nrow(diann_raw),
+    nrow(spectronaut_raw),
+    nrow(maxdia_raw)
+  ),
+  Columns = c(
+    ncol(alpha_raw),
+    ncol(diann_raw),
+    ncol(spectronaut_raw),
+    ncol(maxdia_raw)
+  )
+)
+
+# Inspect column names
+names(alpha_raw)
+names(diann_raw)
+names(spectronaut_raw)
+names(maxdia_raw)
+
+# Preview only the first 3 rows and 8 columns
+head(alpha_raw[, 1:8], 3)
+head(diann_raw[, 1:8], 3)
+head(spectronaut_raw[, 1:8], 3)
+head(maxdia_raw[, 1:8], 3)
+```
+
+## Hemogenize datasets
+```{r homogenize_datasets, message=FALSE, warning=FALSE}
+
+# ============================================================
+# 1. AlphaDIA: wide -> long
+# ============================================================
+
+alpha_run_cols <- names(alpha_raw)[2:85]
+
+alpha_long <- alpha_raw |>
+  rename(
+    Precursor.Id = precursor.mod_seq_charge_hash,
+    Stripped.Sequence = precursor.sequence,
+    Precursor.Charge = precursor.charge,
+    Protein.Group = pg.name
+  ) |>
+  pivot_longer(
+    cols = all_of(alpha_run_cols),
+    names_to = "Run",
+    values_to = "Precursor.Quantity"
+  ) |>
+  mutate(
+    Precursor.Id = as.character(Precursor.Id),
+    Run = str_remove(
+      basename(Run),
+      regex("\\.raw$", ignore_case = TRUE)
+    )
+  )
+
+# ============================================================
+# 2. DIA-NN: wide -> long
+# ============================================================
+
+diann_run_cols <- names(diann_raw)[11:94]
+
+diann_long <- diann_raw |>
+  pivot_longer(
+    cols = all_of(diann_run_cols),
+    names_to = "Run",
+    values_to = "Precursor.Quantity"
+  ) |>
+  mutate(
+    Precursor.Id = as.character(Precursor.Id),
+    Run = str_remove(
+      basename(Run),
+      regex("\\.raw$", ignore_case = TRUE)
+    )
+  )
+
+# ============================================================
+# 3. Spectronaut: long -> standardized long
+# ============================================================
+
+spectronaut_long <- spectronaut_raw |>
+  rename(
+    Run = R.FileName,
+    Precursor.Id = EG.PrecursorId,
+    Stripped.Sequence = PEP.StrippedSequence,
+    Protein.Group = PG.ProteinGroups,
+    Precursor.Quantity = FG.Quantity,
+    PEP = EG.PEP,
+    Cscore = EG.Cscore,
+    Decoy = EG.IsDecoy,
+    IsImputed = EG.IsImputed
+  ) |>
+  mutate(
+    Run = str_remove(
+      basename(Run),
+      regex("\\.raw$", ignore_case = TRUE)
+    ),
+    Precursor.Id = as.character(Precursor.Id)
+  )
+
+# ============================================================
+# 4. MaxDIA: long -> standardized long
+# ============================================================
+
+maxdia_long <- maxdia_raw |>
+  rename(
+    Run = `Raw file`,
+    Modified.Sequence = `Modified sequence`,
+    Stripped.Sequence = Sequence,
+    Precursor.Charge = Charge,
+    Protein.Group = `Leading proteins`,
+    Protein.Ids = Proteins,
+    Precursor.Quantity = Intensity,
+    Q.Value = `Q-value`,
+    DIA.evidence.type = `DIA evidence type`
+  ) |>
+  mutate(
+    Run = str_remove(
+      basename(Run),
+      regex("\\.raw$", ignore_case = TRUE)
+    ),
+    Precursor.Id = paste(
+      Modified.Sequence,
+      Precursor.Charge,
+      sep = "_"
+    )
+  )
+
+# ============================================================
+# 5. Store standardized datasets in a list
+# ============================================================
+
+dia_long <- list(
+  AlphaDIA = alpha_long,
+  DIANN = diann_long,
+  Spectronaut = spectronaut_long,
+  MaxDIA = maxdia_long
+)
+
+# ============================================================
+# 6. Check dimensions and number of runs
+# ============================================================
+
+format_summary <- purrr::imap_dfr(
+  dia_long,
+  function(dat, software) {
+    tibble(
+      Software = software,
+      Rows = nrow(dat),
+      Columns = ncol(dat),
+      Runs = n_distinct(dat$Run)
+    )
+  }
+)
+
+print(format_summary)
+
+```
+
+Each row in the precursor data table is in “long format” and contains information about one precursor in a specific run. 
+
+## Select relevant columns for each software
+Then, we filter the data to reduce the memory footprint. 
+```{r select_precursor_columns}
+# ============================================================
+# 1. AlphaDIA
+# ============================================================
+
+alpha_precursors <- alpha_long |>
   select(
-         Run, 
-         Precursor.Id, 
-         Modified.Sequence, 
-         Stripped.Sequence, 
-         Precursor.Charge, 
-         Protein.Group, 
-         Protein.Names,
-         Protein.Ids,
-         Genes,
-         Precursor.Quantity,
-         Precursor.Normalised,
-         Normalisation.Factor,
-         Ms1.Area,
-         Ms1.Normalised,
-         PG.MaxLFQ,
-         Q.Value, 
-         Lib.Q.Value,
-         PG.Q.Value,
-         Lib.PG.Q.Value,
-         Proteotypic,
-         Decoy, # Not available in older versions of DIA-NN
-         RT)
+    Run,
+    Precursor.Id,
+    Stripped.Sequence,
+    Precursor.Charge,
+    Protein.Group,
+    Precursor.Quantity
+  )
 
-precursors <- precursors |> 
-  mutate(species = grepl(pattern = "UPS",Protein.Group) |> 
-           as.factor() |>
-           recode("TRUE"="ups","FALSE" = "yeast"))
-precursors |> 
-  pull(species) |>
-  table()
+# ============================================================
+# 2. DIA-NN
+# ============================================================
+
+diann_precursors <- diann_long |>
+  select(
+    Run,
+    Precursor.Id,
+    Modified.Sequence,
+    Stripped.Sequence,
+    Precursor.Charge,
+    Protein.Group,
+    Protein.Ids,
+    Protein.Names,
+    Genes,
+    Precursor.Quantity,
+    Proteotypic
+  )
+
+# ============================================================
+# 3. Spectronaut
+# ============================================================
+
+spectronaut_precursors <- spectronaut_long |>
+  select(
+    Run,
+    Precursor.Id,
+    Stripped.Sequence,
+    Protein.Group,
+    Precursor.Quantity,
+    PEP,
+    Cscore,
+    Decoy,
+    IsImputed,
+    Potential.contaminant
+  )
+
+# ============================================================
+# 4. MaxDIA
+# ============================================================
+
+maxdia_precursors <- maxdia_long |>
+  select(
+    Run,
+    Precursor.Id,
+    Modified.Sequence,
+    Stripped.Sequence,
+    Precursor.Charge,
+    Protein.Group,
+    Protein.Ids,
+    Precursor.Quantity,
+    Q.Value,
+    PEP,
+    Reverse,
+    `Potential contaminant`,
+    DIA.evidence.type
+  ) |>
+  rename(
+    Potential.contaminant = `Potential contaminant`
+  )
+
+# ============================================================
+# 5. Store datasets in a list
+# ============================================================
+
+precursors <- list(
+  AlphaDIA = alpha_precursors,
+  DIANN = diann_precursors,
+  Spectronaut = spectronaut_precursors,
+  MaxDIA = maxdia_precursors
+)
+
+# ============================================================
+# 6. Check dimensions and run counts
+# ============================================================
+
+precursor_summary <- purrr::imap_dfr(
+  precursors,
+  function(dat, software) {
+    tibble(
+      Software = software,
+      Rows = nrow(dat),
+      Columns = ncol(dat),
+      Runs = n_distinct(dat$Run)
+    )
+  }
+)
+
+print(precursor_summary)
 ```
+```{r filter_precursors, message=FALSE}
+# Spectronaut
+spectronaut_filtered <- spectronaut_precursors |>
+  filter(
+    Decoy == FALSE,
+    Potential.contaminant == "-",
+    IsImputed == "False",
+    !is.na(PEP),
+    PEP <= 0.01,
+    !is.na(Precursor.Quantity),
+    Precursor.Quantity > 0
+  ) |>
+  arrange(Run, Precursor.Id, PEP, desc(Cscore)) |>
+  distinct(Run, Precursor.Id, .keep_all = TRUE)
+
+
+# MaxDIA
+maxdia_filtered <- maxdia_precursors |>
+  filter(
+    is.na(Reverse),
+    is.na(Potential.contaminant),
+    !is.na(Q.Value),
+    Q.Value <= 0.01,
+    !is.na(Precursor.Quantity),
+    Precursor.Quantity > 0
+  ) |>
+  arrange(Run, Precursor.Id, PEP, Q.Value) |>
+  distinct(Run, Precursor.Id, .keep_all = TRUE)
+
+
+# AlphaDIA
+alpha_filtered <- alpha_precursors |>
+  filter(
+    !is.na(Precursor.Quantity),
+    Precursor.Quantity > 0
+  )
+
+
+# DIA-NN
+diann_filtered <- diann_precursors |>
+  filter(
+    !is.na(Precursor.Quantity),
+    Precursor.Quantity > 0
+  )
+
+
+# Store all four filtered datasets
+precursors_filtered <- list(
+  AlphaDIA = alpha_filtered,
+  DIANN = diann_filtered,
+  Spectronaut = spectronaut_filtered,
+  MaxDIA = maxdia_filtered
+)
+
+
+# Summarize filtering results
+filter_summary <- purrr::imap_dfr(
+  precursors_filtered,
+  function(dat, software) {
+    tibble(
+      Software = software,
+      Rows_After_Filtering = nrow(dat),
+      Runs = n_distinct(dat$Run)
+    )
+  }
+)
+
+print(filter_summary)
+```
+```{r validate_filtered_precursors}
+
+filtered_validation <- purrr::imap_dfr(
+  precursors_filtered,
+  function(dat, software) {
+
+    dt <- data.table::as.data.table(
+      dat[, c("Run", "Precursor.Id", "Precursor.Quantity")]
+    )
+
+    tibble(
+      Software = software,
+      Rows = nrow(dt),
+      Runs = data.table::uniqueN(dt$Run),
+      Missing_IDs = sum(is.na(dt$Precursor.Id)),
+      Missing_Quantities = sum(is.na(dt$Precursor.Quantity)),
+      Nonpositive_Quantities = sum(
+        dt$Precursor.Quantity <= 0,
+        na.rm = TRUE
+      ),
+      Duplicate_Keys = nrow(dt) -
+        data.table::uniqueN(dt, by = c("Run", "Precursor.Id"))
+    )
+  }
+)
+
+print(filtered_validation)
+
+```
+
 
 The sample annotation table is not available and can be generated from the run labels, as the researchers included information on the design in the filenames.
 
-```{r}
-(
-  annot <- data.frame(runCol = precursors |> 
-                       pull(Run) |> 
-                       unique() # 1. 
-                   ) |>
-    mutate(sampleId = gsub(x = runCol, pattern = "_DIA", replacement = "") |> #2.a
-               str_split("UPS2_") |> #2.b
-               sapply(`[`, 2) #2.c
-           ) |>
+```{r sample_annotation}
+# ============================================================
+# Generate sample annotations from run filenames
+# ============================================================
+
+make_annotation <- function(data) {
+
+  tibble(
+    runCol = unique(data$Run)
+  ) |>
     mutate(
-           condition =  gsub("ratio", "", sampleId) |> #3.a
-               str_split("_") |> #3.b
-               sapply(`[`, 1) |> #3.c
-               as.numeric() |> #3.d
-               as.factor(), #3.e
-           rep = sampleId |> 
-               str_split("_") |> #4.a
-               sapply(`[`, 2) |> #4.b
-               replace_na(replace = "1") |> #4.c
-               as.factor(), #4.d
-           ratio = condition |> 
-             as.character() |> 
-             as.double()
-           )
+      # Standardize run names
+      sampleId = basename(runCol),
+      sampleId = str_remove(
+        sampleId,
+        regex("\\.(raw|mzML)$", ignore_case = TRUE)
+      ),
+
+      # Sample-set prefix (meaning to be confirmed)
+      sample_set = str_extract(sampleId, "^Group[1-4]"),
+
+      # Genotype
+      genotype = case_when(
+        str_detect(sampleId, regex("c-jun_KO", ignore_case = TRUE)) ~ "KO",
+        str_detect(sampleId, regex("CTRL", ignore_case = TRUE)) ~ "CTRL",
+        TRUE ~ NA_character_
+      ),
+
+      # Drug treatment
+      treatment = case_when(
+        str_detect(sampleId, regex("JNK-IN-8", ignore_case = TRUE)) &
+          str_detect(sampleId, regex("cDDP", ignore_case = TRUE)) ~ "JNK_IN_8_cDDP",
+
+        str_detect(sampleId, regex("JNK-IN-8", ignore_case = TRUE)) ~ "JNK_IN_8",
+
+        str_detect(sampleId, regex("cDDP", ignore_case = TRUE)) ~ "cDDP",
+
+        TRUE ~ "Untreated"
+      ),
+
+      # Treatment duration
+      time = case_when(
+        str_detect(sampleId, regex("06h", ignore_case = TRUE)) ~ "6h",
+        str_detect(sampleId, regex("24h", ignore_case = TRUE)) ~ "24h",
+        treatment == "Untreated" ~ "Baseline",
+        TRUE ~ NA_character_
+      ),
+
+      # Final numeric suffix in the filename
+      rep = str_extract(sampleId, "[0-9]+$"),
+
+      # Combined experimental condition
+      condition = case_when(
+        !is.na(genotype) & !is.na(time) ~
+          paste(genotype, treatment, time, sep = "_"),
+        TRUE ~ NA_character_
+      ),
+
+      genotype = factor(genotype),
+      treatment = factor(treatment),
+      time = factor(time),
+      condition = factor(condition),
+      rep = factor(rep)
+    ) |>
+    arrange(sampleId)
+}
+
+# ============================================================
+# Apply the function to all four datasets
+# ============================================================
+
+annot <- purrr::map(
+  precursors,
+  make_annotation
+)
+
+# ============================================================
+# Inspect sample annotations
+# ============================================================
+
+# Number of runs per software
+purrr::map_int(annot, nrow)
+
+# Number of samples per experimental condition
+purrr::map(
+  annot,
+  ~ count(.x, condition, name = "n_samples")
+)
+
+# Check whether any filenames could not be classified
+purrr::map(
+  annot,
+  ~ filter(.x, is.na(genotype) | is.na(time))
+)
+
+# Verify that all software packages have identical sample IDs
+identical_sample_ids <- all(
+  purrr::map_lgl(
+    annot,
+    ~ identical(.x$sampleId, annot$DIANN$sampleId)
+  )
+)
+
+cat("Identical sample IDs and order:", identical_sample_ids, "\n")
+
+# Check missing annotation fields
+purrr::imap_dfr(
+  annot,
+  ~ tibble(
+    Software = .y,
+    Missing_Genotype = sum(is.na(.x$genotype)),
+    Missing_Treatment = sum(is.na(.x$treatment)),
+    Missing_Time = sum(is.na(.x$time)),
+    Missing_Condition = sum(is.na(.x$condition)),
+    Duplicate_Sample_IDs = sum(duplicated(.x$sampleId))
+  )
 )
 ```
-Here, we will use the Precursor.Quantity column as quantification input in order to convert to QFeature object.
-```{r}
-(qf <- readQFeatures(assayData = precursors,  
-                              colData = annot,
-                              quantCols = "Precursor.Quantity",
-                              runCol = "Run",
-                              fnames = "Precursor.Id"))
+## Qfeatures
+Here, Precursor.Quantity provides the quantitative values, and Precursor.Id identifies the precursor features.
 
-colData(qf)
-#knitr::kable(head(colData(qf)))
-qf$condition
-```
-We can extract the `SummarizedExperiment` object for the B000254_Ap_6883_EXT-765_DIA_Yeast_UPS2_ratio02_DIA set using double bracket subsetting.The precursor annotations are available for in the corresponding `rowData`. We can also retrieve the quantitative values for each set using `assay()`.
-```{r}
-qf[["B000254_Ap_6883_EXT-765_DIA_Yeast_UPS2_ratio02_DIA"]]
-rowData(qf[["B000254_Ap_6883_EXT-765_DIA_Yeast_UPS2_ratio02_DIA"]])
-#knitr::kable(head(rowData(qf[["B000254_Ap_6883_EXT-765_DIA_Yeast_UPS2_ratio02_DIA"]])))
+```{r create_qfeatures, message=FALSE}
+# ============================================================
+# Create one QFeatures object per software
+# ============================================================
 
-assay(qf[[8]]) |> head(5)
+qf <- purrr::imap(
+  precursors_filtered,
+  function(dat, software) {
+
+    readQFeatures(
+      assayData = dat,
+      colData = annot[[software]],
+      quantCols = "Precursor.Quantity",
+      runCol = "Run",
+      fnames = "Precursor.Id"
+    )
+  }
+)
+
+# Inspect each QFeatures object
+purrr::map(qf, assayNames)
+
+# Inspect dimensions
+purrr::map(
+  qf,
+  ~ lapply(assayNames(.x), function(nm) dim(.x[[nm]]))
+)
 ```
+
+
 # Data preprocessing
 The data preprocessing workflow for DIA data is similar to the workflow for DDA-LFQ data, but there are suble differences as we start from precursor level data and have additional columns. 
 
