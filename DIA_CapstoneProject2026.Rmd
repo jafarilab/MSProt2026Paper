@@ -1147,124 +1147,419 @@ qf_diann <- readRDS(combined_qf_files[["DIANN"]])
 ```
 
 ## Filtering
-Filtering removes low-quality and unreliable precursors that would otherwise introduce noise and artefacts in the data. We apply standard filtering advised by DIA-NN:
+```{r filter_combined_precursors, message=FALSE}
+# ============================================================
+# Filter combined precursor-level QFeatures
+#
+# 1. Detection in >= 2/3 of samples in ANY condition
+# 2. Remove decoys, reverse hits and contaminants
+# 3. Retain proteotypic peptides where identifiable
+# 4. Do NOT remove proteins supported by only one peptide
+#
+# IMPORTANT:
+# Proteotypic status cannot yet be verified for AlphaDIA
+# and Spectronaut using their current combined rowData.
+# ============================================================
 
-1. q-value threshold of 0.01 for the identification of precursors (Q.Value) and protein groups (PG.Q.Value). If the file is processed via matching between runs, it is also useful to filter on Lib.Q.Value and Lib.PG.Q.Value.
+software_names <- c(
+  "AlphaDIA", "DIANN", "Spectronaut", "MaxDIA"
+)
 
-2. Remove precursors that could not be mapped, i.e. when Precursor.Id column is an empty string.
+filtered_qf_files <- setNames(
+  file.path(
+    cache_dir,
+    paste0("qf_", software_names, "_filtered_final.rds")
+  ),
+  software_names
+)
 
-3. Filter decoys, i.e. only keep precursors for which the Decoy column equals 0. (Note, that the Decoy column is not present in the output of older versions of DIA-NN)
+filter_summary <- list()
 
-4. Keeping only proteotypic peptides, which map uniquely to a specific protein.
-```{r}
-qf <-  qf |>
-  filterFeatures(~ Q.Value <= 0.01 & #1.
-                     PG.Q.Value <= 0.01 &  #1.
-                     Lib.Q.Value <= 0.01 & #1.
-                     Lib.PG.Q.Value <= 0.01 & #1.
-                     Precursor.Id != "" & #2.
-                     Decoy == 0 & #3. (Note, that this filter is not available with previous versions of DIA-NN, as the report.tsv file did not include a Decoy column. So other strategies are needed if Decoys are in the output file.)
-                     Proteotypic == 1) #4.
+# Helper: nonmissing, nonempty text
+valid_text <- function(z) {
+  !is.na(z) & nzchar(trimws(as.character(z)))
+}
 
-Note, that it is important that the filtering criteria are not distorting the distribution of the test statistics in the downstream analysis for features that are non-DA.
+# Helper: annotations indicating an unflagged entry
+# Supports logical FALSE, numeric 0, and MaxQuant-style "-"
+not_flagged <- function(z) {
+  z <- tolower(trimws(as.character(z)))
 
-(Assay joining, an extra step compare to previous DDA workflow)
+  is.na(z) | z %in% c("", "-", "0", "false")
+}
 
-Up to now, the data from different runs were kept in separate assays. We can now join the normalised sets into an precursor set using joinAssays(). Sets are joined by stacking the columns (samples) in a matrix and rows (features) are matched according to a row identifier, here the `Precursor.Id`. We will store the result in the assay with name: `precursor`.
-```{r}
-(qf <- joinAssays(
-  x = qf,
-  i = names(qf),
-  fcol = "Precursor.Id",
-  name = "precursors"
-  ))
+for (software in software_names) {
+
+  message("Filtering ", software, "...")
+
+  # ----------------------------------------------------------
+  # 1. Load one combined QFeatures object
+  # ----------------------------------------------------------
+
+  qf_one <- readRDS(combined_qf_files[[software]])
+  se <- qf_one[["precursors"]]
+
+  rd <- as.data.frame(rowData(se))
+  cd <- as.data.frame(colData(se))
+
+  n_before <- nrow(se)
+
+  # ----------------------------------------------------------
+  # 2. Condition-aware detection filter
+  # ----------------------------------------------------------
+
+  conditions <- as.character(cd$condition)
+
+  stopifnot(
+    length(conditions) == ncol(se),
+    !anyNA(conditions),
+    identical(rownames(cd), colnames(se))
+  )
+
+  groups <- split(seq_along(conditions), conditions)
+
+  keep_detection <- rep(FALSE, n_before)
+
+  for (idx in groups) {
+
+    min_obs <- ceiling(length(idx) * 2 / 3)
+
+    # Only extract columns for the current condition
+    x_group <- assay(se)[, idx, drop = FALSE]
+
+    observed <- rowSums(
+      !is.na(x_group) & x_group > 0
+    )
+
+    keep_detection <- keep_detection |
+      (observed >= min_obs)
+
+    rm(x_group, observed)
+  }
+
+  # ----------------------------------------------------------
+  # 3. Require valid precursor and protein annotations
+  # ----------------------------------------------------------
+
+  required_columns <- c(
+    "Precursor.Id",
+    "Stripped.Sequence",
+    "Protein.Group"
+  )
+
+  stopifnot(all(required_columns %in% names(rd)))
+
+  keep_ids <-
+    valid_text(rd$Precursor.Id) &
+    valid_text(rd$Stripped.Sequence) &
+    valid_text(rd$Protein.Group)
+
+  # ----------------------------------------------------------
+  # 4. Remove decoys, reverse hits and contaminants
+  # ----------------------------------------------------------
+
+  keep_quality <- rep(TRUE, n_before)
+
+  # Spectronaut: logical Decoy TRUE/FALSE
+  if ("Decoy" %in% names(rd)) {
+
+    z <- tolower(trimws(as.character(rd$Decoy)))
+
+    keep_quality <- keep_quality &
+      !is.na(z) &
+      z %in% c("false", "0", "-")
+  }
+
+  # MaxDIA: Reverse flag, typically "+" or blank
+  if ("Reverse" %in% names(rd)) {
+
+    keep_quality <- keep_quality &
+      not_flagged(rd$Reverse)
+  }
+
+  # Spectronaut / MaxDIA: Potential.contaminant
+  #
+  # Spectronaut uses:
+  #   "-" = not flagged
+  #   "+" = contaminant
+  #
+  # MaxDIA may also use "+" / blank.
+  if ("Potential.contaminant" %in% names(rd)) {
+
+    keep_quality <- keep_quality &
+      not_flagged(rd$Potential.contaminant)
+  }
+
+  # ----------------------------------------------------------
+  # 5. Proteotypic peptide filtering
+  # ----------------------------------------------------------
+
+  keep_proteotypic <- rep(TRUE, n_before)
+  proteotypic_unknown <- rep(FALSE, n_before)
+
+  if ("Proteotypic" %in% names(rd)) {
+
+    # DIA-NN: explicit proteotypic annotation
+    z <- tolower(trimws(as.character(rd$Proteotypic)))
+
+    keep_proteotypic <- !is.na(z) &
+      z %in% c("true", "1")
+
+  } else if ("Protein.Ids" %in% names(rd)) {
+
+    # MaxDIA: proxy based on protein identifiers
+    # Semicolon-separated multiple IDs are treated as
+    # ambiguous protein assignments.
+    ids <- trimws(as.character(rd$Protein.Ids))
+
+    keep_proteotypic <- valid_text(ids) &
+      !grepl(";", ids, fixed = TRUE)
+
+    proteotypic_unknown <- !valid_text(ids)
+
+  } else {
+
+    # AlphaDIA and Spectronaut:
+    # Current Protein.Group annotation alone is
+    # insufficient to establish peptide uniqueness.
+    #
+    # Retain these rows but record unknown status.
+    proteotypic_unknown <- rep(TRUE, n_before)
+  }
+
+  # ----------------------------------------------------------
+  # 6. Combine all filters
+  # ----------------------------------------------------------
+
+  keep <- keep_detection &
+    keep_ids &
+    keep_quality &
+    keep_proteotypic
+
+  # ----------------------------------------------------------
+  # 7. Summarize filtering
+  # ----------------------------------------------------------
+
+  filter_summary[[software]] <- data.frame(
+    Software = software,
+    Before = n_before,
+    Passed_Detection = sum(keep_detection),
+    Passed_Quality = sum(keep_quality),
+    Passed_Proteotypic = sum(keep_proteotypic),
+    Unknown_Proteotypic_After_Filter = sum(
+      keep & proteotypic_unknown
+    ),
+    Retained = sum(keep),
+    Removed = sum(!keep),
+    Retained_Percent = round(100 * mean(keep), 2)
+  )
+
+  # ----------------------------------------------------------
+  # 8. Filter QFeatures
+  # ----------------------------------------------------------
+
+  qf_filtered <- qf_one[keep, , ]
+
+  filtered_se <- qf_filtered[["precursors"]]
+
+  # Verify assay dimensions and sample metadata
+  stopifnot(
+    nrow(filtered_se) == sum(keep),
+    ncol(filtered_se) == ncol(se),
+    nrow(rowData(filtered_se)) == nrow(filtered_se),
+    nrow(colData(filtered_se)) == ncol(filtered_se),
+    identical(
+      rownames(colData(filtered_se)),
+      colnames(filtered_se)
+    )
+  )
+
+  # ----------------------------------------------------------
+  # 9. Save filtered QFeatures
+  # ----------------------------------------------------------
+
+  output_file <- filtered_qf_files[[software]]
+  temp_file <- paste0(output_file, ".tmp")
+
+  saveRDS(qf_filtered, temp_file)
+
+  if (!file.rename(temp_file, output_file)) {
+    stop("Could not save filtered QFeatures for ", software)
+  }
+
+  message(
+    software, ": ",
+    sum(keep), " / ", n_before,
+    " precursors retained (",
+    round(100 * mean(keep), 2), "%)"
+  )
+
+  # ----------------------------------------------------------
+  # 10. Release memory before next software
+  # ----------------------------------------------------------
+
+  rm(
+    qf_one, qf_filtered, se, filtered_se,
+    rd, cd, keep, keep_detection,
+    keep_ids, keep_quality,
+    keep_proteotypic, proteotypic_unknown,
+    conditions, groups
+  )
+
+  gc(verbose = FALSE)
+}
+
+# ============================================================
+# Final filtering summary
+# ============================================================
+
+filter_summary <- dplyr::bind_rows(filter_summary)
+
+print(tibble::as_tibble(filter_summary), width = Inf)
 ```
-```{r}
-qf[,,"precursors"] |> 
-  longForm(colvars = colnames(colData(qf))) |> 
-  ggplot(aes(x = sampleId)) +
-  geom_bar(aes(fill = factor(!is.na(value))),
-           colour = "black") +
-  theme_minimal()
-```
+Precursor-level filtering was performed independently for AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Precursors were retained if they had positive, non-missing intensities in at least two-thirds of the samples within any one experimental condition, preserving condition-specific signals. Annotated decoys, reverse hits, and potential contaminants were excluded. Proteotypic filtering was applied using DIA-NN's explicit annotation and a single-protein-identifier criterion for MaxDIA; however, proteotypic status could not be reliably verified for AlphaDIA and Spectronaut, so these precursors were retained pending further assessment. No minimum peptide count per protein was imposed. Following filtering, AlphaDIA retained 62.5%, DIA-NN 67.8%, Spectronaut 90.8%, and MaxDIA 63.6% of their initial precursors. Spectronaut's higher retention reflects its nearly complete quantitative matrix, whereas detection-frequency filtering had a greater impact on the other pipelines. Differences in software-specific quantification and proteotypic annotations should therefore be considered when interpreting precursor coverage.
+```{r visualize_precursor_filtering, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+# Prepare filtering results for visualization
+filter_plot_data <- filter_summary |>
+  dplyr::select(Software, Retained, Removed) |>
+  tidyr::pivot_longer(
+    cols = c(Retained, Removed),
+    names_to = "Status",
+    values_to = "Count"
+  ) |>
+  dplyr::group_by(Software) |>
+  dplyr::mutate(Percentage = 100 * Count / sum(Count)) |>
+  dplyr::ungroup()
 
-We keep peptides that were observed at last 4 times out of the 9 samples, so 
-that we can estimate the peptide characteristics, so we keep peptides that are 
-observed in at least 44.4% of the samples, which corresponds to one treatment 
-condition. This is an arbitrary value that may need to be adjusted depending on
-the experiment and the data set.
-```{r}
-nObs <- 4
-n <- ncol(qf[["precursors"]])
+# Set consistent software order
+filter_plot_data$Software <- factor(
+  filter_plot_data$Software,
+  levels = c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA"),
+  labels = c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
+)
 
-(qf <- filterNA(qf, i = "precursors", pNA = (n - nObs) / n))
-```
-Here, we remove proteins that can only be found by one peptide, as such proteins may not be trustworthy.
-
-1. We first calculate how many distinct peptides map to each protein (Protein.Group). We use the stripped precursor sequence, i.e. sequence of the base peptide for this purpose.
-
-2. We store this information in the row data of the precursors assay
-
-3. We filter precursors of one-hit wonder proteins.
-```{r}
-# Filter for peptides per protein
-pepsPerProtDf <- qf[["precursors"]] |> 
-    rowData() |> 
-    data.frame() |>
-    dplyr::select("Stripped.Sequence", "Protein.Group") |>
-    group_by(Protein.Group) |>
-    mutate(pepsPerProt = Stripped.Sequence |>
-               unique() |> length()
-           ) #1.
-
-rowData(qf[["precursors"]])$pepsPerProt <- pepsPerProtDf$pepsPerProt #2. 
-
-qf <- filterFeatures(qf, 
-                              ~ pepsPerProt > 1, 
-                              keep = TRUE) #3.
-```
-## Log-transformation
-For this, we perform a short data manipulation pipeline:
-
-1. We use `longForm()` to convert the QFeatures object into a long table, where each row contains the quantitative information about one observation, in which column, row and set it was found. Long tables are particularly useful for manipulating data with the tidyverse ecosystem, namely with ggplot2 for visualisation. `longForm()` also allows to include annotations, and we here include `Mixture` and `TechRepMixture` for filtering and colouring.
-2. `longForm()` returns a `DataFrame` which we convert to a `data.frame`.
-3. We filter the data to keep only the data from precursor “(UniMod:1)ADSRDPASDQMQHWK3”.
-```{r}
-dat <- longForm(qf, colvars = colnames(colData(qf))) |> ## 1.
-  data.frame() |> ## 2.
-  filter(rowname == "(UniMod:1)ADSRDPASDQMQHWK3") ## 3.
-
-# Left plot: original scale
-p1 <- ggplot(dat, aes(x = ratio, y = value)) +
-  geom_point(color = "black", size = 2) +
-  labs(
-    x = "ratio",
-    y = "value"
+# Plot retained and removed precursor proportions
+ggplot2::ggplot(
+  filter_plot_data,
+  ggplot2::aes(
+    x = Software,
+    y = Percentage,
+    fill = Status
+  )
+) +
+  ggplot2::geom_col(width = 0.65) +
+  ggplot2::geom_text(
+    ggplot2::aes(
+      label = paste0(round(Percentage, 1), "%")
+    ),
+    position = ggplot2::position_stack(vjust = 0.5),
+    size = 4,
+    color = "white",
+    fontface = "bold"
   ) +
-  theme_minimal()
-
-# Right plot: log2 scale
-p2 <- ggplot(dat, aes(x = log2(ratio), y = log2(value))) +
-  geom_point(color = "black", size = 2) +
-  labs(
-    x = "UPS ratio (left original, right (log2))",
-    y = "log2(value)"
+  ggplot2::scale_fill_manual(
+    values = c(
+      "Retained" = "#2A9D8F",
+      "Removed" = "#E76F51"
+    )
   ) +
-  theme_minimal()
-
-# Combine plots
-(p1 | p2) +
-  plot_annotation(
-    title = "UPS precursor ADSRDPASDQMQHWK3"
+  ggplot2::scale_y_continuous(
+    limits = c(0, 100),
+    breaks = seq(0, 100, 20),
+    labels = function(x) paste0(x, "%"),
+    expand = ggplot2::expansion(mult = c(0, 0))
+  ) +
+  ggplot2::labs(
+    title = "Precursor retention after filtering",
+    subtitle = "Condition-aware detection and available quality filters",
+    x = NULL,
+    y = "Proportion of initial precursors",
+    fill = NULL,
+    caption = "Proteotypic filtering is not fully harmonized across software."
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    legend.position = "top",
+    axis.text.x = ggplot2::element_text(face = "bold"),
+    plot.caption = ggplot2::element_text(
+      color = "grey40",
+      hjust = 0
+    )
   )
 ```
-Upon, log2-transformation we can see that the problem of unequal variability is solved. Another advantages of log2-transformation is that it provides a scale that directly relates to biological interpretation. We perform log2-transformation with `logTransform()` from the `QFeatures` package. We use `base = 2` and store the result in a new summarized experiment named `precursors_log`.
-```{r}
-qf <- logTransform(qf, 
-                      base = 2, 
-                      i = "precursors", 
-                      name = "precursors_log")
+
+## Log-transformation
+```{r log_transform_precursors, message=FALSE}
+# ============================================================
+# Log2 transformation of filtered precursor intensities
+# Update existing filtered QFeatures files and R objects
+# ============================================================
+
+qf_object_names <- c(
+  AlphaDIA = "qf_alpha",
+  DIANN = "qf_diann",
+  Spectronaut = "qf_spectro",
+  MaxDIA = "qf_maxdia"
+)
+
+for (software in software_names) {
+
+  message("Log2-transforming ", software, "...")
+
+  # Load existing filtered QFeatures
+  qf_one <- readRDS(filtered_qf_files[[software]])
+
+  # Add log2-transformed assay
+  if (!"precursors_log" %in% names(qf_one)) {
+    qf_one <- QFeatures::logTransform(
+      qf_one,
+      base = 2,
+      i = "precursors",
+      name = "precursors_log"
+    )
+  }
+
+  # Verify both assays
+  stopifnot(
+    all(c("precursors", "precursors_log") %in% names(qf_one)),
+    identical(
+      dim(qf_one[["precursors"]]),
+      dim(qf_one[["precursors_log"]])
+    )
+  )
+
+  # Overwrite existing filtered cache file
+  saveRDS(qf_one, filtered_qf_files[[software]])
+
+  # Update the corresponding R object
+  assign(qf_object_names[[software]], qf_one, envir = .GlobalEnv)
+
+  message(
+    software, ": ",
+    nrow(qf_one[["precursors_log"]]),
+    " precursors × ",
+    ncol(qf_one[["precursors_log"]]),
+    " runs"
+  )
+
+  rm(qf_one)
+  gc(verbose = FALSE)
+}
+
+# Verify assay structure in each object
+lapply(
+  mget(unname(qf_object_names)),
+  names
+)
+
+# Visualize QFeatures structures
+plot(qf_alpha)
+plot(qf_diann)
+plot(qf_spectro)
+plot(qf_maxdia)
 ```
+Following precursor-level filtering, intensity values were log2-transformed using the `logTransform()` function from the QFeatures package to reduce right-skewness and improve comparability of quantitative measurements. The transformed intensities were stored in a new assay named precursors_log, while the original filtered intensities were preserved in precursors. Both assays were retained within each software-specific QFeatures object (`qf_alpha`, `qf_diann`, `qf_spectro`, and `qf_maxdia`), maintaining their metadata and processing relationships for subsequent analysis.
 
 ## Normalization
 The most common objective of MS-based proteomics experiments is to understand the biological changes in protein abundance between experimental conditions. However, changes in measurements between groups can be caused due to technical factors. For instance, there are systematic fluctuations from run-to-run that shift the measured intensity distribution. We can this explore as follows:
