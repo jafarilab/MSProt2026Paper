@@ -527,105 +527,6 @@ precursor_summary <- purrr::imap_dfr(
 
 print(precursor_summary)
 ```
-```{r filter_precursors, message=FALSE}
-# Spectronaut
-spectronaut_filtered <- spectronaut_precursors |>
-  filter(
-    Decoy == FALSE,
-    Potential.contaminant == "-",
-    IsImputed == "False",
-    !is.na(PEP),
-    PEP <= 0.01,
-    !is.na(Precursor.Quantity),
-    Precursor.Quantity > 0
-  ) |>
-  arrange(Run, Precursor.Id, PEP, desc(Cscore)) |>
-  distinct(Run, Precursor.Id, .keep_all = TRUE)
-
-
-# MaxDIA
-maxdia_filtered <- maxdia_precursors |>
-  filter(
-    is.na(Reverse),
-    is.na(Potential.contaminant),
-    !is.na(Q.Value),
-    Q.Value <= 0.01,
-    !is.na(Precursor.Quantity),
-    Precursor.Quantity > 0
-  ) |>
-  arrange(Run, Precursor.Id, PEP, Q.Value) |>
-  distinct(Run, Precursor.Id, .keep_all = TRUE)
-
-
-# AlphaDIA
-alpha_filtered <- alpha_precursors |>
-  filter(
-    !is.na(Precursor.Quantity),
-    Precursor.Quantity > 0
-  )
-
-
-# DIA-NN
-diann_filtered <- diann_precursors |>
-  filter(
-    !is.na(Precursor.Quantity),
-    Precursor.Quantity > 0
-  )
-
-
-# Store all four filtered datasets
-precursors_filtered <- list(
-  AlphaDIA = alpha_filtered,
-  DIANN = diann_filtered,
-  Spectronaut = spectronaut_filtered,
-  MaxDIA = maxdia_filtered
-)
-
-
-# Summarize filtering results
-filter_summary <- purrr::imap_dfr(
-  precursors_filtered,
-  function(dat, software) {
-    tibble(
-      Software = software,
-      Rows_After_Filtering = nrow(dat),
-      Runs = n_distinct(dat$Run)
-    )
-  }
-)
-
-print(filter_summary)
-```
-```{r validate_filtered_precursors}
-
-filtered_validation <- purrr::imap_dfr(
-  precursors_filtered,
-  function(dat, software) {
-
-    dt <- data.table::as.data.table(
-      dat[, c("Run", "Precursor.Id", "Precursor.Quantity")]
-    )
-
-    tibble(
-      Software = software,
-      Rows = nrow(dt),
-      Runs = data.table::uniqueN(dt$Run),
-      Missing_IDs = sum(is.na(dt$Precursor.Id)),
-      Missing_Quantities = sum(is.na(dt$Precursor.Quantity)),
-      Nonpositive_Quantities = sum(
-        dt$Precursor.Quantity <= 0,
-        na.rm = TRUE
-      ),
-      Duplicate_Keys = nrow(dt) -
-        data.table::uniqueN(dt, by = c("Run", "Precursor.Id"))
-    )
-  }
-)
-
-print(filtered_validation)
-
-```
-
 
 The sample annotation table is not available and can be generated from the run labels, as the researchers included information on the design in the filenames.
 
@@ -749,36 +650,241 @@ purrr::imap_dfr(
 ```
 ## Qfeatures
 Here, Precursor.Quantity provides the quantitative values, and Precursor.Id identifies the precursor features.
-
-```{r create_qfeatures, message=FALSE}
+```{r resolve_duplicate_precursors, message=FALSE}
 # ============================================================
-# Create one QFeatures object per software
+# Resolve duplicate precursor-run records before QFeatures
+# Only Spectronaut and MaxDIA
 # ============================================================
 
-qf <- purrr::imap(
-  precursors_filtered,
+# AlphaDIA and DIA-NN already have unique precursor-run keys
+alpha_qf_input <- alpha_precursors
+diann_qf_input <- diann_precursors
+
+# Spectronaut:
+# Prefer nonmissing quantity, lowest PEP, highest Cscore
+spectronaut_qf_input <- spectronaut_precursors |>
+  arrange(
+    Run,
+    Precursor.Id,
+    is.na(Precursor.Quantity),
+    PEP,
+    desc(Cscore)
+  ) |>
+  distinct(Run, Precursor.Id, .keep_all = TRUE)
+
+# MaxDIA:
+# Prefer nonmissing quantity, lowest PEP, lowest Q.Value
+maxdia_qf_input <- maxdia_precursors |>
+  arrange(
+    Run,
+    Precursor.Id,
+    is.na(Precursor.Quantity),
+    PEP,
+    Q.Value
+  ) |>
+  distinct(Run, Precursor.Id, .keep_all = TRUE)
+
+# Store QFeatures input tables
+precursors_qf <- list(
+  AlphaDIA = alpha_qf_input,
+  DIANN = diann_qf_input,
+  Spectronaut = spectronaut_qf_input,
+  MaxDIA = maxdia_qf_input
+)
+
+# Validate unique precursor-run identifiers
+duplicate_validation <- purrr::imap_dfr(
+  precursors_qf,
   function(dat, software) {
-
-    readQFeatures(
-      assayData = dat,
-      colData = annot[[software]],
-      quantCols = "Precursor.Quantity",
-      runCol = "Run",
-      fnames = "Precursor.Id"
+    tibble(
+      Software = software,
+      Rows = nrow(dat),
+      Runs = n_distinct(dat$Run),
+      Duplicate_Keys = nrow(dat) -
+        data.table::uniqueN(
+          data.table::as.data.table(
+            dat[, c("Run", "Precursor.Id")]
+          ),
+          by = c("Run", "Precursor.Id")
+        ),
+      Zero_Quantities = sum(dat$Precursor.Quantity == 0, na.rm = TRUE),
+      Missing_Quantities = sum(is.na(dat$Precursor.Quantity))
     )
   }
 )
 
-# Inspect each QFeatures object
-purrr::map(qf, assayNames)
-
-# Inspect dimensions
-purrr::map(
-  qf,
-  ~ lapply(assayNames(.x), function(nm) dim(.x[[nm]]))
-)
+print(duplicate_validation, width = Inf)
 ```
 
+```{r create_qfeatures, message=FALSE}
+# ============================================================
+# Create and cache deduplicated QFeatures objects
+# One QFeatures object per software
+# No identification-confidence or intensity filtering
+# ============================================================
+
+cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
+
+dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+
+software_names <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
+
+# Cache paths for deduplicated, otherwise unfiltered data
+qf_files <- setNames(
+  file.path(
+    cache_dir,
+    paste0("qf_", software_names, "_deduplicated.rds")
+  ),
+  software_names
+)
+
+# Verify duplicate resolution before QFeatures creation
+if (any(duplicate_validation$Duplicate_Keys != 0)) {
+  stop("Duplicate precursor-run identifiers remain.")
+}
+
+# Create and cache one software at a time
+for (software in software_names) {
+
+  qf_file <- qf_files[[software]]
+
+  if (file.exists(qf_file)) {
+    message(software, ": deduplicated cache already exists. Skipping.")
+    next
+  }
+
+  message("Creating QFeatures for ", software, "...")
+
+  # Use original precursor data after duplicate resolution
+  dat <- precursors_qf[[software]]
+
+  qf_one <- readQFeatures(
+    assayData = dat,
+    colData = annot[[software]],
+    quantCols = "Precursor.Quantity",
+    runCol = "Run",
+    fnames = "Precursor.Id"
+  )
+
+  # Save to temporary file first
+  temp_file <- paste0(qf_file, ".tmp")
+
+  saveRDS(qf_one, temp_file)
+
+  if (!file.rename(temp_file, qf_file)) {
+    stop("Could not finalize QFeatures cache for ", software)
+  }
+
+  message(software, ": saved to ", qf_file)
+
+  # Release memory before processing next software
+  rm(dat, qf_one)
+  gc(verbose = FALSE)
+}
+
+message("Deduplicated QFeatures cache creation finished.")
+```
+
+### Recovery qfs
+```{r load_qfeatures, message=FALSE}
+# ============================================================
+# Recover cached deduplicated QFeatures objects
+# ============================================================
+
+cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
+
+software_names <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
+
+qf_files <- setNames(
+  file.path(
+    cache_dir,
+    paste0("qf_", software_names, "_deduplicated.rds")
+  ),
+  software_names
+)
+
+# Confirm that all caches exist
+print(file.exists(qf_files))
+
+if (!all(file.exists(qf_files))) {
+  stop("One or more deduplicated QFeatures caches are missing.")
+}
+
+# Inspect AlphaDIA as an example
+qf_one <- readRDS(qf_files[["AlphaDIA"]])
+
+show(qf_one)
+
+# Assay names and dimensions
+head(names(qf_one))
+length(qf_one)
+
+lapply(
+  seq_len(min(5L, length(qf_one))),
+  function(i) dim(qf_one[[i]])
+)
+
+rm(qf_one)
+gc(verbose = FALSE)
+```
+
+```{r inspect_qfeatures_all, message=FALSE}
+# ============================================================
+# Initial inspection of unfiltered precursor-level QFeatures
+# ============================================================
+
+qf_summary <- list()
+run_summary <- list()
+
+for (software in software_names) {
+
+  message("Inspecting ", software, "...")
+
+  # Load only one QFeatures object
+  qf_one <- readRDS(qf_files[[software]])
+
+  # Each assay represents one LC-MS run
+  run_names <- names(qf_one)
+
+  n_precursors <- vapply(
+    seq_along(qf_one),
+    function(i) nrow(qf_one[[i]]),
+    integer(1)
+  )
+
+  # Overall summary
+  qf_summary[[software]] <- tibble(
+    Software = software,
+    Assays = length(qf_one),
+    Total_Observations = sum(n_precursors),
+    Min_Precursors_Per_Run = min(n_precursors),
+    Median_Precursors_Per_Run = median(n_precursors),
+    Max_Precursors_Per_Run = max(n_precursors)
+  )
+
+  # Per-run precursor counts
+  run_summary[[software]] <- tibble(
+    Software = software,
+    Run = run_names,
+    N_Precursors = n_precursors
+  )
+
+  rm(qf_one)
+  gc(verbose = FALSE)
+}
+
+qf_summary <- dplyr::bind_rows(qf_summary)
+run_summary <- dplyr::bind_rows(run_summary)
+
+print(qf_summary, width = Inf)
+```
+
+```{r}
+(qf_alpha <- readRDS(qf_files[["AlphaDIA"]]))
+(qf_spectro <- readRDS(qf_files[["Spectronaut"]]))
+(qf_maxdia <- readRDS(qf_files[["MaxDIA"]]))
+(qf_diann <- readRDS(qf_files[["DIANN"]]))
+```
 
 # Data preprocessing
 The data preprocessing workflow for DIA data is similar to the workflow for DDA-LFQ data, but there are suble differences as we start from precursor level data and have additional columns. 
@@ -786,10 +892,259 @@ The data preprocessing workflow for DIA data is similar to the workflow for DDA-
 ## Missing values
 The first preprocessing step is to correctly encode the missing values. It is important that missing values are encoded using `NA`. For instance, non-observed values should not be encoded with a zero because true zeros (the proteomic feature is absent from the sample) cannot be distinguished from technical zeros (the feature was missed by the instrument or could not be identified). We therefore replace any zero in the quantitative data with an `NA`.
 
-```{r}
-qf <- zeroIsNA(qf, names(qf))
+```{r count_zero_intensities, message=FALSE}
+# ============================================================
+# Count zero and missing precursor intensities before zeroIsNA
+# ============================================================
+
+software_names <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
+
+zero_summary <- vector("list", length(software_names))
+names(zero_summary) <- software_names
+
+zero_by_run <- vector("list", length(software_names))
+names(zero_by_run) <- software_names
+
+for (software in software_names) {
+
+  message("Checking zero intensities: ", software)
+
+  # Load one cached QFeatures object at a time
+  qf_one <- readRDS(qf_files[[software]])
+
+  # Count values in each run-specific assay
+  run_counts <- purrr::map_dfr(
+    seq_along(qf_one),
+    function(i) {
+
+      x <- assay(qf_one[[i]])
+
+      tibble(
+        Software = software,
+        Run = names(qf_one)[i],
+        Total_Values = length(x),
+        Zero_Values = sum(x == 0, na.rm = TRUE),
+        Missing_Values = sum(is.na(x)),
+        Nonpositive_Values = sum(x < 0, na.rm = TRUE)
+      )
+    }
+  )
+
+  zero_by_run[[software]] <- run_counts
+
+  zero_summary[[software]] <- run_counts |>
+    summarise(
+      Software = first(Software),
+      Runs = n(),
+      Total_Values = sum(Total_Values),
+      Zero_Values = sum(Zero_Values),
+      Missing_Values = sum(Missing_Values),
+      Nonpositive_Values = sum(Nonpositive_Values)
+    )
+
+  rm(qf_one, run_counts)
+  gc(verbose = FALSE)
+}
+
+zero_summary <- dplyr::bind_rows(zero_summary)
+zero_by_run <- dplyr::bind_rows(zero_by_run)
+
+print(zero_summary, width = Inf)
 ```
-Note that `msqrob2` can handle missing data without having to rely on hard-to-verify imputation assumptions, which is our general recommendation. However, `msqrob2` does not prevent users from using imputation, which can be performed with `impute() `from the `QFeatures` package.
+
+Inspection of the precursor-level QFeatures objects revealed differences in how missing measurements are represented across the four DIA software packages. AlphaDIA contained 324,817 precursor entries in each of the 84 runs, with 13,010,298 intensity values encoded as zeros. DIA-NN and Spectronaut already represented missing intensity measurements as NA, with 10,497,983 and 49 missing values, respectively, in the QFeatures objects. In contrast, MaxDIA contained 15,350,731 precursor observations across 84 runs, with varying numbers of precursor entries per run and no explicit zeros or NA values. These differences indicate that AlphaDIA represents unquantified precursor measurements as zeros, DIA-NN and Spectronaut use explicit NA values for missing measurements, and MaxDIA reports only available precursor records. However, the absence of explicit missing values does not imply complete precursor coverage across runs, as unreported precursor–run combinations may be absent from the individual assays. Therefore, AlphaDIA's zero intensities will be converted to NA using zeroIsNA(), while missing precursor–run combinations will be accounted for when aligning precursor identifiers across runs.
+
+```{r}
+# Convert zero intensities to NA in all 84 assays
+qf_alpha <- zeroIsNA(qf_alpha, names(qf_alpha))
+```
+
+## Joining assay
+Combine 84 run-specific assays into one precursor assay for each DIA software:
+
+```{r combine_qfeatures_all, message=FALSE}
+# ============================================================
+# Combine 84 assays into one precursor-level assay per software
+# Validate assay, rowData and colData
+# Save each software separately
+# ============================================================
+
+software_names <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
+
+combined_qf_files <- setNames(
+  file.path(
+    cache_dir,
+    paste0("qf_", software_names, "_combined.rds")
+  ),
+  software_names
+)
+
+for (software in software_names) {
+
+  message("Processing ", software, "...")
+
+  output_file <- combined_qf_files[[software]]
+
+  if (file.exists(output_file)) {
+    message("Combined cache already exists: ", software)
+    next
+  }
+
+  # Load one software at a time
+  qf_one <- readRDS(qf_files[[software]])
+
+  # Convert AlphaDIA zero intensities to NA
+  if (software == "AlphaDIA") {
+    qf_one <- zeroIsNA(qf_one, names(qf_one))
+  }
+
+  # Join all 84 run-specific assays by precursor identifier
+  qf_combined <- joinAssays(
+    qf_one,
+    i = names(qf_one),
+    name = "precursors"
+  )
+
+  # Keep only the combined assay
+  qf_combined <- qf_combined[, , "precursors"]
+
+  # Extract sample annotations from QFeatures
+  sample_metadata <- as.data.frame(colData(qf_combined))
+
+  # Match annotations to assay columns
+  run_names <- colnames(qf_combined[["precursors"]])
+
+  stopifnot(
+    length(run_names) == 84L,
+    !anyDuplicated(run_names),
+    all(run_names %in% rownames(sample_metadata))
+  )
+
+  sample_metadata <- sample_metadata[
+    run_names,
+    ,
+    drop = FALSE
+  ]
+
+  # Attach sample annotations directly to combined assay
+  colData(qf_combined[["precursors"]]) <-
+    S4Vectors::DataFrame(sample_metadata)
+
+  # Validate dimensions and annotation alignment
+  se <- qf_combined[["precursors"]]
+
+  stopifnot(
+    ncol(se) == 84L,
+    nrow(rowData(se)) == nrow(se),
+    nrow(colData(se)) == ncol(se),
+    identical(rownames(colData(se)), colnames(se))
+  )
+
+  # Check remaining zeros and missing values
+  x <- assay(se)
+
+  n_zeros <- sum(x == 0, na.rm = TRUE)
+  n_missing <- sum(is.na(x))
+
+  if (software == "AlphaDIA" && n_zeros != 0) {
+    stop("AlphaDIA still contains zero intensities.")
+  }
+
+  message(
+    software,
+    ": ", nrow(se), " precursors × ", ncol(se), " runs",
+    "; zeros = ", n_zeros,
+    "; NA = ", n_missing
+  )
+
+  # Save using a temporary file
+  temp_file <- paste0(output_file, ".tmp")
+
+  saveRDS(qf_combined, temp_file)
+
+  if (!file.rename(temp_file, output_file)) {
+    stop("Could not save combined QFeatures for ", software)
+  }
+
+  message("Saved: ", output_file)
+
+  # Release memory
+  rm(qf_one, qf_combined, se, x, sample_metadata)
+  gc(verbose = FALSE)
+}
+
+message("All four combined QFeatures objects are ready.")
+```
+### Recovery qfs
+
+```{r recover_combined_qfeatures, message=FALSE}
+# ============================================================
+# Locate saved combined QFeatures objects
+# Inspect one software at a time
+# ============================================================
+
+cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
+
+software_names <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
+
+combined_qf_files <- setNames(
+  file.path(
+    cache_dir,
+    paste0("qf_", software_names, "_combined.rds")
+  ),
+  software_names
+)
+
+# Confirm all four files exist
+print(file.exists(combined_qf_files))
+
+if (!all(file.exists(combined_qf_files))) {
+  stop("One or more combined QFeatures files are missing.")
+}
+```
+
+
+```{r Inspect_combined_qfeatures, message=FALSE}
+# Inspect each software without keeping all objects in memory
+combined_summary <- list()
+
+for (software in software_names) {
+
+  qf_one <- readRDS(combined_qf_files[[software]])
+
+  se <- qf_one[["precursors"]]
+
+  combined_summary[[software]] <- tibble(
+    Software = software,
+    Precursors = nrow(se),
+    Runs = ncol(se),
+    RowData_Columns = ncol(rowData(se)),
+    ColData_Columns = ncol(colData(se)),
+    Zero_Values = sum(assay(se) == 0, na.rm = TRUE),
+    Missing_Values = sum(is.na(assay(se)))
+  )
+
+  rm(qf_one, se)
+  gc(verbose = FALSE)
+}
+
+combined_summary <- dplyr::bind_rows(combined_summary)
+
+print(combined_summary, width = Inf)
+
+```
+
+```{r load_all_combined_qfeatures, message=FALSE}
+# ============================================================
+# Load all four combined QFeatures objects into R environment
+# ============================================================
+
+qf_alpha <- readRDS(combined_qf_files[["AlphaDIA"]])
+qf_spectro <- readRDS(combined_qf_files[["Spectronaut"]])
+qf_maxdia <- readRDS(combined_qf_files[["MaxDIA"]])
+qf_diann <- readRDS(combined_qf_files[["DIANN"]])
+
+```
 
 ## Filtering
 Filtering removes low-quality and unreliable precursors that would otherwise introduce noise and artefacts in the data. We apply standard filtering advised by DIA-NN:
@@ -810,7 +1165,7 @@ qf <-  qf |>
                      Precursor.Id != "" & #2.
                      Decoy == 0 & #3. (Note, that this filter is not available with previous versions of DIA-NN, as the report.tsv file did not include a Decoy column. So other strategies are needed if Decoys are in the output file.)
                      Proteotypic == 1) #4.
-```
+
 Note, that it is important that the filtering criteria are not distorting the distribution of the test statistics in the downstream analysis for features that are non-DA.
 
 (Assay joining, an extra step compare to previous DDA workflow)
