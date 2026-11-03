@@ -1800,6 +1800,7 @@ rm(raw, log_x, floor_mask, se_raw, se_log, keep,
    conditions, groups)
 gc(verbose = FALSE)
 ```
+Run chunk 23 to re-visualize the distribution after extra filtering.
 
 ## Normalization
 Systematic technical variation between LC-MS runs can introduce differences in measured precursor intensities that are unrelated to biological conditions. Pre-normalization QC revealed batch-associated intensity shifts across the four DIA analysis pipelines. To account for run-level differences, the Median of Ratios method was applied independently to each software's log2-transformed precursor intensities. Normalization factors were calculated using `nfLogMedianOfRatios()` and subtracted from each corresponding run using `sweep()`. The normalized intensities were stored in a new assay named `precursors_norm`, preserving the original precursors and `precursors_log` assays.
@@ -2353,65 +2354,254 @@ sapply(
   }
 )
 ```
-The results strengthen the justification for excluding Group1_c-jun_KO_1, particularly for DIA-NN and MaxDIA.
+The results strengthen the justification for excluding Group1_c-jun_KO_1, particularly for DIA-NN and MaxDIA (Run chunk 26 to re-check).
 
 ## Aggregation
-The objective of aggregation is to summarise the precursor-level intensities into a protein expression value. We illustrate the motivation for summarisation using all peptide-level data for one of the spiked UPS proteins. 
-```{r}
-protName <- "UPS|P01008ups|ANT3_HUMAN_UPS"
-qf[,,"precursors_norm"] |> 
-  longForm(colvars = colnames(colData(qf)), rowvars = "Protein.Ids") |> 
-  data.frame() |> 
-  filter(Protein.Ids == protName) |>
-  ggplot() +
-  aes(x = rowname, 
-      y = value,
-      group = colname) +
-  geom_line(linewidth = 0.1) +
-  geom_point(aes(fill = condition), size = 3, shape = 21) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjus = 0.5),
-        legend.position = "top") + 
-  labs(
-       subtitle = protName,
-       x = "Precursor", 
-       y = "log2(norm Intensity)") +
-  theme_minimal()+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+The objective of aggregation is to summarise the precursor-level intensities into a protein expression value. The fact that different precursors have different intensities (2.), may be inconsistently identified (3.) and/or quantified (4.), and show sample correlations (5.) can lead to bias if we use simple summarisation approaches such as summing or averaging the precursor intensities for each sample. Instead, we will resort to more advanced summarisation approaches to accommodate for these issues. Here, we summarise the precursor-level data into protein intensities usin`g maxLFQ`. It is implemented in the `maxLFQ` function of the `iq` package.
+
+```{r protein_aggregation_maxlfq, message=FALSE}
+# ============================================================
+# Protein-level aggregation using MaxLFQ
+# Four DIA software packages, 83 runs each
+# ============================================================
+
+qf_object_names <- c(
+  AlphaDIA = "qf_alpha",
+  DIANN = "qf_diann",
+  Spectronaut = "qf_spectro",
+  MaxDIA = "qf_maxdia"
+)
+
+aggregation_summary <- list()
+
+for (software in names(qf_object_names)) {
+
+  message("Aggregating proteins for ", software, "...")
+
+  object_name <- qf_object_names[[software]]
+  qf_one <- get(object_name, envir = .GlobalEnv)
+
+  # Verify normalized assay and protein identifiers
+  stopifnot(
+    "precursors_norm" %in% names(qf_one),
+    "Protein.Group" %in%
+      colnames(rowData(qf_one[["precursors_norm"]])),
+    ncol(qf_one[["precursors_norm"]]) == 83L
+  )
+
+  # Aggregate normalized precursor intensities to proteins
+  qf_one <- QFeatures::aggregateFeatures(
+    qf_one,
+    i = "precursors_norm",
+    name = "proteins",
+    fcol = "Protein.Group",
+    fun = function(X, ...) {
+      iq::maxLFQ(X)$estimate
+    }
+  )
+
+  # Verify protein assay
+  stopifnot(
+    "proteins" %in% names(qf_one),
+    ncol(qf_one[["proteins"]]) == 83L
+  )
+
+  # Summarize aggregation
+  protein_x <- assay(qf_one[["proteins"]])
+
+  aggregation_summary[[software]] <- data.frame(
+    Software = software,
+    Precursors = nrow(qf_one[["precursors_norm"]]),
+    Proteins = nrow(protein_x),
+    Runs = ncol(protein_x),
+    Quantified_Proteins = sum(
+      rowSums(is.finite(protein_x)) > 0
+    ),
+    Complete_Proteins = sum(
+      rowSums(is.finite(protein_x)) == ncol(protein_x)
+    )
+  )
+
+  # Update existing QFeatures object
+  assign(object_name, qf_one, envir = .GlobalEnv)
+
+  # Overwrite existing filtered cache file
+  saveRDS(qf_one, filtered_qf_files[[software]])
+
+  message(
+    software, ": ",
+    nrow(protein_x), " protein groups aggregated"
+  )
+
+  rm(qf_one, protein_x)
+  gc(verbose = FALSE)
+}
+
+aggregation_summary <- dplyr::bind_rows(
+  aggregation_summary
+)
+
+print(aggregation_summary)
+
+# Check final assay structure
+lapply(
+  qf_object_names,
+  function(object_name) {
+    names(get(object_name))
+  }
+)
 ```
 
-1. We can see that data for a protein can consist of many precursors, hence the need for summarisation.
-2. We observe that different precursors have different intensities within the same sample (same line). This is because different precursors have different properties and hence differ in their ionisation efficiency, which will influence the detectability in the MS (Challenges).
-3. The precursor identification are inconsistent between groups of interest. We can see the low-concentration group (condition a, red) display more missing values than the high-concentration group (condition e, blue). Moreover, which value is missing depends on the precursor characteristics. All the precursors found in the low-concentration group are the most intense precursors in the high concentration group.
-4. We also often find outliers, for instance, due to misidentification or fluctuations during MS acquisition.
-5. These data also suggest pseudo-replication. The precursor intensities in one same sample (dots connected by a line) are correlated, i.e. they more alike than the precursor intensities between samples (the lines do not perfectly align).
+### Recovery qfs
+```{r recover_protein_qfeatures, message=FALSE}
+# ============================================================
+# Recover saved protein-level QFeatures objects
+# ============================================================
 
-The fact that different precursors have different intensities (2.), may be inconsistently identified (3.) and/or quantified (4.), and show sample correlations (5.) can lead to bias if we use simple summarisation approaches such as summing or averaging the precursor intensities for each sample. Instead, we will resort to more advanced summarisation approaches to accommodate for these issues. Here, we summarise the precursor-level data into protein intensities usin`g maxLFQ`. It is implemented in the `maxLFQ` function of the `iq` package.
-```{r}
-(qf <- aggregateFeatures(
-  qf, i = "precursors_norm", 
-  name = "proteins",
-  fcol = "Protein.Group", 
-#  fun = MsCoreUtils::medianPolish,
-#  na.rm = TRUE
-  fun = function(X, ...) iq::maxLFQ(X)$estimate
-))
+cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
 
-qf["UPS|P01008ups|ANT3_HUMAN_UPS", , ]
+software_names <- c(
+  "AlphaDIA", "DIANN", "Spectronaut", "MaxDIA"
+)
+
+filtered_qf_files <- setNames(
+  file.path(
+    cache_dir,
+    paste0("qf_", software_names, "_filtered_final.rds")
+  ),
+  software_names
+)
+
+# Load saved QFeatures objects
+qf_alpha  <- readRDS(filtered_qf_files[["AlphaDIA"]])
+qf_diann  <- readRDS(filtered_qf_files[["DIANN"]])
+qf_spectro <- readRDS(filtered_qf_files[["Spectronaut"]])
+qf_maxdia <- readRDS(filtered_qf_files[["MaxDIA"]])
+
+# Verify recovered assays and protein-level dimensions
+qf_list <- list(
+  AlphaDIA = qf_alpha,
+  DIANN = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
+)
+
+recovery_summary <- dplyr::bind_rows(
+  lapply(names(qf_list), function(software) {
+
+    qf_one <- qf_list[[software]]
+
+    has_proteins <- "proteins" %in% names(qf_one)
+
+    data.frame(
+      Software = software,
+      Assays = paste(names(qf_one), collapse = ", "),
+      Protein_Assay = has_proteins,
+      Proteins = if (has_proteins) {
+        nrow(qf_one[["proteins"]])
+      } else {
+        NA_integer_
+      },
+      Runs = ncol(qf_one[["precursors_norm"]])
+    )
+  })
+)
+
+print(recovery_summary)
+
+# Check whether aggregation completed for all four
+if (!all(recovery_summary$Protein_Assay)) {
+  warning(
+    "Some QFeatures objects do not contain a proteins assay. ",
+    "Aggregation may not have completed for those software packages."
+  )
+}
 ```
-```{r}
-qf[, , "proteins"] |>
-  longForm(colvars = colnames(colData(qf))) |> 
-  data.frame() |> 
-  filter(!is.na(value)) |>
-  ggplot() + 
-  aes(x = value,
-      colour = condition,
-      group = colname) +
-  geom_density() +
-  theme_minimal() +
-   labs(subtitle = "Normalised log2 protein intensities")
-plot(qf)
+
+The tutorial uses longForm() to visualize every measurement. Because your datasets are large, this version samples up to 2,000 quantified proteins per run for plotting, while retaining all protein measurements in the QFeatures objects.
+```{r protein_aggregation_density, fig.width=14, fig.height=9, message=FALSE, warning=FALSE}
+# ============================================================
+# Protein-level intensity density plots
+# Four DIA software packages
+# ============================================================
+
+set.seed(123)
+
+protein_density <- lapply(
+  names(qf_object_names),
+  function(software) {
+
+    qf_one <- get(qf_object_names[[software]])
+    se <- qf_one[["proteins"]]
+
+    x <- assay(se)
+
+    dplyr::bind_rows(
+      lapply(seq_len(ncol(x)), function(j) {
+
+        values <- x[, j]
+        values <- values[is.finite(values)]
+
+        if (length(values) > 2000) {
+          values <- sample(values, 2000)
+        }
+
+        data.frame(
+          Software = software,
+          Run = colnames(x)[j],
+          Log2_Intensity = values
+        )
+      })
+    )
+  }
+)
+
+protein_density <- dplyr::bind_rows(protein_density)
+
+protein_density$Software <- factor(
+  protein_density$Software,
+  levels = names(qf_object_names)
+)
+
+ggplot2::ggplot(
+  protein_density,
+  ggplot2::aes(
+    x = Log2_Intensity,
+    group = Run
+  )
+) +
+  ggplot2::geom_density(
+    color = "#277DA1",
+    linewidth = 0.4,
+    alpha = 0.55
+  ) +
+  ggplot2::facet_wrap(
+    ~ Software,
+    scales = "free",
+    ncol = 2
+  ) +
+  ggplot2::labs(
+    title = "Protein-level intensity distributions after MaxLFQ aggregation",
+    subtitle = "83 LC-MS runs per software",
+    x = "Normalized log2 protein intensity",
+    y = "Density"
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    strip.text = ggplot2::element_text(face = "bold")
+  )
+
+rm(protein_density)
+gc(verbose = FALSE)
 ```
+Overall, MaxLFQ aggregation produced reasonably consistent protein-level intensity distributions across the 83 runs in all four software packages.
+- AlphaDIA: Narrow, closely overlapping distributions, indicating good run-to-run consistency.
+- DIA-NN: Broader distributions with slightly more variability, but generally good overlap.
+- Spectronaut: Strong overlap around the main peak, although a small low-intensity tail remains.
+- MaxDIA: Good overall alignment, with some variability in peak height and distribution shape.
+
+The protein-level distributions look suitable for proceeding to downstream QC and differential abundance analysis. There are no obvious extreme run-level outliers remaining.
 
 The data processing is complete.
 
