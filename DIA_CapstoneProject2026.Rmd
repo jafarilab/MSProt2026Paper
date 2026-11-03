@@ -1561,57 +1561,799 @@ plot(qf_maxdia)
 ```
 Following precursor-level filtering, intensity values were log2-transformed using the `logTransform()` function from the QFeatures package to reduce right-skewness and improve comparability of quantitative measurements. The transformed intensities were stored in a new assay named precursors_log, while the original filtered intensities were preserved in precursors. Both assays were retained within each software-specific QFeatures object (`qf_alpha`, `qf_diann`, `qf_spectro`, and `qf_maxdia`), maintaining their metadata and processing relationships for subsequent analysis.
 
-## Normalization
-The most common objective of MS-based proteomics experiments is to understand the biological changes in protein abundance between experimental conditions. However, changes in measurements between groups can be caused due to technical factors. For instance, there are systematic fluctuations from run-to-run that shift the measured intensity distribution. We can this explore as follows:
 
-1. We extract the sets containing the log transformed data. This is performed using `QFeatures`’ 3-way subsetting.
-2. We use `longForm()` to convert the `QFeatures` object into a long table, including `condition` and concentration for filtering and coloring.
-3. We visualize the density of the quantitative values within each sample. We color each sample based on its spike-in condition.
+```{r precursor_histograms_before_normalization, fig.width=12, fig.height=7, message=FALSE, warning=FALSE}
+# ============================================================
+# Log2 precursor intensity distributions before normalization
+# 84 runs per software, displayed as overlaid histograms
+# ============================================================
 
-```{r}
-qf[, , "precursors_log"] |> #1.
-  longForm(colvars = colnames(colData(qf))) |>  #2. 
-  data.frame() |> 
-  filter(!is.na(value)) |>
-  ggplot() + #3.
-  aes(x = value,
-      colour = condition,
-      group = colname) +
-  geom_density() +
-  theme_minimal()
-```
-Even in this clean synthetic data set (same yeast background with some spiked UPS proteins), the marginal precursor intensity distributions across samples are not well aligned. Ignoring this effect will increase the noise and reduce the statistical power of the experiment, and may also, in case of unbalanced designs, introduce confounding effects that will bias the results. Here, we will use the Median of Ratios method of DESeq2, which was originally developed for RNA-seq data analysis and can also correct for differences in composition of the proteomes in the different samples.
-
-1. We calculate the log transformed normalisation factor from the Median of Ratios method
-2. Subtract these log2-norm factors from the intensities of each corresponding column of the assay data and store the result in the new assay peptides_norm.
-```{r}
-nfLog <- nfLogMedianOfRatios(qf, "precursors_log") #1.
-
-qf<- sweep( #Subtract log2 norm factor column-by-column (MARGIN = 2) #2.
-  qf,
-  MARGIN = 2,
-  STATS = nfLog,
-  i = "precursors_log",
-  name = "precursors_norm"
+qf_list <- list(
+  AlphaDIA = qf_alpha,
+  `DIA-NN` = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
 )
 
-```
-Note that users can also use all normalisation functions that are provided in QFeatures, i.e. by replacing the sweep function by `QFeatures::normalize` or that they can start from intensities normalised by DIA-NN, e.g. `Precursor.Normalised`.
+set.seed(123)
 
-```{r}
-qf[, , "precursors_norm"] |>
-  longForm(colvars = colnames(colData(qf))) |> 
-  data.frame() |> 
-  filter(!is.na(value)) |>
-  ggplot() + 
-  aes(x = value,
-      colour = condition,
-      group = colname) +
-  geom_density() +
-  labs(subtitle = "Normalised log2 precursor intensities") +
-  theme_minimal()
+hist_data <- list()
+
+for (software in names(qf_list)) {
+
+  se <- qf_list[[software]][["precursors_log"]]
+
+  # Sample up to 5,000 nonmissing intensities per run
+  run_data <- lapply(seq_len(ncol(se)), function(j) {
+
+    values <- assay(se)[, j]
+    values <- values[is.finite(values)]
+
+    if (length(values) > 5000) {
+      values <- sample(values, 5000)
+    }
+
+    data.frame(
+      Software = software,
+      Run = colnames(se)[j],
+      Log2_Intensity = values
+    )
+  })
+
+  hist_data[[software]] <- dplyr::bind_rows(run_data)
+}
+
+hist_data <- dplyr::bind_rows(hist_data)
+
+# Plot all 84 run distributions for each software
+ggplot2::ggplot(
+  hist_data,
+  ggplot2::aes(
+    x = Log2_Intensity,
+    group = Run
+  )
+) +
+  ggplot2::geom_histogram(
+    ggplot2::aes(y = ggplot2::after_stat(density)),
+    bins = 70,
+    position = "identity",
+    fill = NA,
+    color = "#277DA1",
+    linewidth = 0.25,
+    alpha = 0.3
+  ) +
+  ggplot2::facet_wrap(
+    ~ Software,
+    scales = "free_x",
+    ncol = 2
+  ) +
+  ggplot2::labs(
+    title = "Pre-normalization precursor intensity distributions",
+    subtitle = "84 LC-MS runs per software; sampled log2 intensities",
+    x = "Log2 precursor intensity",
+    y = "Density"
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    strip.text = ggplot2::element_text(face = "bold"),
+    plot.title = ggplot2::element_text(face = "bold")
+  )
 ```
-Upon normalisation, we can see that the distributions nicely overlap.
+
+```{r precursor_density_before_normalization, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
+# ============================================================
+# Pre-normalization log2 precursor intensity distributions
+# One density curve per software, pooling all 84 runs
+# ============================================================
+
+qf_object_names <- c(
+  AlphaDIA = "qf_alpha",
+  `DIA-NN` = "qf_diann",
+  Spectronaut = "qf_spectro",
+  MaxDIA = "qf_maxdia"
+)
+
+set.seed(123)
+
+density_data <- lapply(names(qf_object_names), function(software) {
+
+  qf_one <- get(qf_object_names[[software]])
+  x <- assay(qf_one[["precursors_log"]])
+
+  # Sample up to 100,000 finite values per software
+  # to avoid storing millions of observations for plotting
+  values <- as.vector(x)
+  values <- values[is.finite(values)]
+
+  if (length(values) > 100000) {
+    values <- sample(values, 100000)
+  }
+
+  data.frame(
+    Software = software,
+    Log2_Intensity = values
+  )
+})
+
+density_data <- dplyr::bind_rows(density_data)
+
+ggplot2::ggplot(
+  density_data,
+  ggplot2::aes(
+    x = Log2_Intensity,
+    color = Software,
+    fill = Software
+  )
+) +
+  ggplot2::geom_density(
+    linewidth = 1.1,
+    alpha = 0.22,
+    adjust = 1
+  ) +
+  ggplot2::scale_x_continuous(
+    limits = c(
+      min(-2, min(density_data$Log2_Intensity) - 2),
+      NA
+    ),
+    expand = ggplot2::expansion(mult = c(0, 0.02))
+  ) +
+  ggplot2::labs(
+    title = "Pre-normalization precursor intensity distributions",
+    subtitle = "Pooled log2 intensities across 84 LC-MS runs per software",
+    x = "Log2 precursor intensity",
+    y = "Density",
+    color = "Software",
+    fill = "Software"
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    legend.position = "top",
+    legend.title = ggplot2::element_blank()
+  )
+
+rm(density_data)
+```
+Unlike the other three software packages, Spectronaut has a distinctly multimodal intensity distribution, including a sharp peak near log2 intensity = 0 and a broader low-intensity population between approximately 2 and 7. This is particularly suspicious because almost every Spectronaut precursor has a reported intensity in all 84 runs, despite IsImputed = False throughout.
+### Extra filtering step
+```{r spectronaut_intensity_floor_correction, message=FALSE}
+# Replace Spectronaut raw intensity = 1 with NA
+# and reapply condition-aware precursor filtering
+
+se_raw <- qf_spectro[["precursors"]]
+se_log <- qf_spectro[["precursors_log"]]
+
+raw <- assay(se_raw)
+log_x <- assay(se_log)
+
+# Identify suspected floor values
+floor_mask <- !is.na(raw) & raw == 1
+
+n_floor <- sum(floor_mask)
+
+# Replace corresponding values in both assays
+raw[floor_mask] <- NA_real_
+log_x[floor_mask] <- NA_real_
+
+assay(se_raw) <- raw
+assay(se_log) <- log_x
+
+qf_spectro[["precursors"]] <- se_raw
+qf_spectro[["precursors_log"]] <- se_log
+
+# Reapply the 2/3 detection criterion within ANY condition
+conditions <- as.character(
+  colData(qf_spectro[["precursors"]])$condition
+)
+
+stopifnot(!anyNA(conditions))
+
+groups <- split(seq_along(conditions), conditions)
+
+keep <- rep(FALSE, nrow(qf_spectro[["precursors"]]))
+
+for (idx in groups) {
+  min_obs <- ceiling(length(idx) * 2 / 3)
+
+  observed <- rowSums(
+    !is.na(raw[, idx, drop = FALSE]) &
+      raw[, idx, drop = FALSE] > 0
+  )
+
+  keep <- keep | (observed >= min_obs)
+}
+
+n_before <- nrow(qf_spectro[["precursors"]])
+
+# Filter both assays together
+qf_spectro <- qf_spectro[keep, , ]
+
+# Verify assay structure and consistency
+stopifnot(
+  all(c("precursors", "precursors_log") %in% names(qf_spectro)),
+  identical(
+    dim(qf_spectro[["precursors"]]),
+    dim(qf_spectro[["precursors_log"]])
+  ),
+  identical(
+    is.na(assay(qf_spectro[["precursors"]])),
+    is.na(assay(qf_spectro[["precursors_log"]]))
+  )
+)
+
+# Update the existing filtered cache file
+saveRDS(qf_spectro, filtered_qf_files[["Spectronaut"]])
+
+# Summarize correction
+data.frame(
+  Floor_Values_Replaced = n_floor,
+  Precursors_Before = n_before,
+  Precursors_After = nrow(qf_spectro[["precursors"]]),
+  Precursors_Removed = n_before - nrow(qf_spectro[["precursors"]])
+)
+
+# Visualize updated QFeatures structure
+plot(qf_spectro)
+
+# Release temporary matrices
+rm(raw, log_x, floor_mask, se_raw, se_log, keep,
+   conditions, groups)
+gc(verbose = FALSE)
+```
+
+## Normalization
+Systematic technical variation between LC-MS runs can introduce differences in measured precursor intensities that are unrelated to biological conditions. Pre-normalization QC revealed batch-associated intensity shifts across the four DIA analysis pipelines. To account for run-level differences, the Median of Ratios method was applied independently to each software's log2-transformed precursor intensities. Normalization factors were calculated using `nfLogMedianOfRatios()` and subtracted from each corresponding run using `sweep()`. The normalized intensities were stored in a new assay named `precursors_norm`, preserving the original precursors and `precursors_log` assays.
+
+```{r normalize_precursors, message=FALSE}
+# ============================================================
+# Median of Ratios normalization for four DIA software tools
+# ============================================================
+
+qf_object_names <- c(
+  AlphaDIA = "qf_alpha",
+  DIANN = "qf_diann",
+  Spectronaut = "qf_spectro",
+  MaxDIA = "qf_maxdia"
+)
+
+normalization_summary <- list()
+
+for (software in names(qf_object_names)) {
+
+  message("Normalizing ", software, "...")
+
+  object_name <- qf_object_names[[software]]
+  qf_one <- get(object_name, envir = .GlobalEnv)
+
+  # Calculate log2 normalization factors
+ nf_log <- msqrob2::nfLogMedianOfRatios(
+  qf_one,
+  "precursors_log"
+)
+
+  # Check normalization factors
+  stopifnot(
+    length(nf_log) == ncol(qf_one[["precursors_log"]]),
+    all(is.finite(nf_log))
+  )
+
+  # Create normalized assay
+  qf_one <- sweep(
+    qf_one,
+    MARGIN = 2,
+    STATS = nf_log,
+    i = "precursors_log",
+    name = "precursors_norm"
+  )
+
+  # Verify all three assays
+  stopifnot(
+    all(
+      c("precursors", "precursors_log", "precursors_norm") %in%
+        names(qf_one)
+    ),
+    identical(
+      dim(qf_one[["precursors_log"]]),
+      dim(qf_one[["precursors_norm"]])
+    )
+  )
+
+  # Summarize normalization factors
+  normalization_summary[[software]] <- data.frame(
+    Software = software,
+    Min_Factor = min(nf_log),
+    Median_Factor = median(nf_log),
+    Max_Factor = max(nf_log),
+    SD_Factor = sd(nf_log)
+  )
+
+  # Update existing QFeatures object
+  assign(object_name, qf_one, envir = .GlobalEnv)
+
+  # Update existing filtered cache file (no new RDS)
+  saveRDS(qf_one, filtered_qf_files[[software]])
+
+  message(software, ": normalization completed")
+
+  rm(qf_one, nf_log)
+  gc(verbose = FALSE)
+}
+
+normalization_summary <- dplyr::bind_rows(
+  normalization_summary
+)
+
+print(normalization_summary)
+
+# Check assay structure
+names(qf_alpha)
+names(qf_diann)
+names(qf_spectro)
+names(qf_maxdia)
+
+# Visualize processing structure
+plot(qf_alpha)
+plot(qf_diann)
+plot(qf_spectro)
+plot(qf_maxdia)
+```
+
+```{r evaluate_precursor_normalization, fig.width=14, fig.height=10, message=FALSE, warning=FALSE}
+# ============================================================
+# Evaluate Median of Ratios normalization
+# Four DIA software packages, 84 runs each
+# ============================================================
+
+qf_object_names <- c(
+  AlphaDIA = "qf_alpha",
+  `DIA-NN` = "qf_diann",
+  Spectronaut = "qf_spectro",
+  MaxDIA = "qf_maxdia"
+)
+
+set.seed(123)
+
+density_list <- list()
+median_list <- list()
+
+for (software in names(qf_object_names)) {
+
+  qf_one <- get(qf_object_names[[software]])
+
+  before <- assay(qf_one[["precursors_log"]])
+  after  <- assay(qf_one[["precursors_norm"]])
+
+  runs <- colnames(before)
+
+  batch <- dplyr::case_when(
+    grepl("^Group1_", runs) ~ "Group 1",
+    grepl("^Group2_", runs) ~ "Group 2",
+    grepl("^Group3_", runs) ~ "Group 3",
+    grepl("^Group4_", runs) ~ "Group 4",
+    grepl("^20260331_", runs) ~ "20260331",
+    TRUE ~ "Unknown"
+  )
+
+  # ----------------------------------------------------------
+  # 1. Run-level medians using all finite intensities
+  # ----------------------------------------------------------
+
+  median_before <- apply(before, 2, function(v) {
+    v <- v[is.finite(v)]
+    if (length(v)) median(v) else NA_real_
+  })
+
+  median_after <- apply(after, 2, function(v) {
+    v <- v[is.finite(v)]
+    if (length(v)) median(v) else NA_real_
+  })
+
+  median_list[[software]] <- data.frame(
+    Software = software,
+    Run = runs,
+    Batch = batch,
+    Before = as.numeric(median_before),
+    After = as.numeric(median_after)
+  )
+
+  # ----------------------------------------------------------
+  # 2. Sample up to 2,000 values per run for density plots
+  # ----------------------------------------------------------
+
+  density_list[[software]] <- dplyr::bind_rows(
+    lapply(seq_along(runs), function(j) {
+
+      idx <- which(
+        is.finite(before[, j]) &
+        is.finite(after[, j])
+      )
+
+      if (length(idx) > 2000) {
+        idx <- sample(idx, 2000)
+      }
+
+      data.frame(
+        Software = software,
+        Run = runs[j],
+        Before = before[idx, j],
+        After = after[idx, j]
+      )
+    })
+  )
+
+  rm(qf_one, before, after)
+  gc(verbose = FALSE)
+}
+
+# ============================================================
+# Prepare plotting data
+# ============================================================
+
+density_qc <- dplyr::bind_rows(density_list) |>
+  tidyr::pivot_longer(
+    cols = c(Before, After),
+    names_to = "Stage",
+    values_to = "Log2_Intensity"
+  )
+
+median_qc_norm <- dplyr::bind_rows(median_list) |>
+  tidyr::pivot_longer(
+    cols = c(Before, After),
+    names_to = "Stage",
+    values_to = "Median_Log2"
+  )
+
+software_order <- c(
+  "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
+)
+
+batch_order <- c(
+  "Group 1", "Group 2", "Group 3",
+  "Group 4", "20260331", "Unknown"
+)
+
+density_qc$Software <- factor(
+  density_qc$Software,
+  levels = software_order
+)
+
+median_qc_norm$Software <- factor(
+  median_qc_norm$Software,
+  levels = software_order
+)
+
+density_qc$Stage <- factor(
+  density_qc$Stage,
+  levels = c("Before", "After")
+)
+
+median_qc_norm$Stage <- factor(
+  median_qc_norm$Stage,
+  levels = c("Before", "After")
+)
+
+median_qc_norm$Batch <- factor(
+  median_qc_norm$Batch,
+  levels = batch_order
+)
+
+# ============================================================
+# Plot 1: Density distributions before vs. after normalization
+# ============================================================
+
+p_density <- ggplot2::ggplot(
+  density_qc,
+  ggplot2::aes(
+    x = Log2_Intensity,
+    group = Run
+  )
+) +
+  ggplot2::geom_density(
+    color = "#277DA1",
+    linewidth = 0.35,
+    alpha = 0.55
+  ) +
+  ggplot2::facet_grid(
+    Software ~ Stage,
+    scales = "free_y"
+  ) +
+  ggplot2::labs(
+    title = "Precursor intensity distributions before and after normalization",
+    subtitle = "84 runs per software; 2,000 sampled intensities per run",
+    x = "Log2 precursor intensity",
+    y = "Density"
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    strip.text = ggplot2::element_text(face = "bold")
+  )
+
+print(p_density)
+
+# ============================================================
+# Plot 2: Median intensity by batch before vs. after
+# ============================================================
+
+p_median <- ggplot2::ggplot(
+  median_qc_norm,
+  ggplot2::aes(
+    x = Batch,
+    y = Median_Log2,
+    fill = Batch
+  )
+) +
+  ggplot2::geom_boxplot(
+    width = 0.65,
+    alpha = 0.35,
+    outlier.shape = NA
+  ) +
+  ggplot2::geom_jitter(
+    width = 0.15,
+    height = 0,
+    size = 1.5,
+    alpha = 0.75
+  ) +
+  ggplot2::facet_grid(
+    Software ~ Stage,
+    scales = "free_y"
+  ) +
+  ggplot2::labs(
+    title = "Run-level median intensity by acquisition batch",
+    subtitle = "Before versus after Median of Ratios normalization",
+    x = "Acquisition batch",
+    y = "Median log2 precursor intensity"
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    strip.text = ggplot2::element_text(face = "bold"),
+    axis.text.x = ggplot2::element_text(
+      angle = 35,
+      hjust = 1
+    ),
+    legend.position = "none"
+  )
+
+print(p_median)
+
+# ============================================================
+# Numerical evaluation: run-to-run median variability
+# ============================================================
+
+normalization_qc_summary <- median_qc_norm |>
+  dplyr::group_by(Software, Stage) |>
+  dplyr::summarise(
+    N_Runs = sum(is.finite(Median_Log2)),
+    SD_Run_Medians = sd(Median_Log2, na.rm = TRUE),
+    IQR_Run_Medians = IQR(Median_Log2, na.rm = TRUE),
+    Range_Run_Medians = diff(
+      range(Median_Log2, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  )
+
+print(normalization_qc_summary)
+
+# Remove large temporary plotting data
+rm(density_list, median_list, density_qc)
+gc(verbose = FALSE)
+```
+```{r}
+set.seed(123)
+
+target_run <- "Group1_c-jun_KO_1"
+
+qf_list <- list(
+  AlphaDIA = qf_alpha,
+  `DIA-NN` = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
+)
+
+highlight_data <- dplyr::bind_rows(
+  lapply(names(qf_list), function(software) {
+
+    qf_one <- qf_list[[software]]
+
+    dplyr::bind_rows(
+      lapply(c("precursors_log", "precursors_norm"), function(assay_name) {
+
+        x <- assay(qf_one[[assay_name]])
+
+        dplyr::bind_rows(
+          lapply(seq_len(ncol(x)), function(j) {
+
+            v <- x[, j]
+            v <- v[is.finite(v)]
+
+            if (length(v) > 2000) {
+              v <- sample(v, 2000)
+            }
+
+            data.frame(
+              Software = software,
+              Stage = if (assay_name == "precursors_log") "Before" else "After",
+              Run = colnames(x)[j],
+              Intensity = v,
+              Highlight = if (colnames(x)[j] == target_run) "Suspected outlier" else "Other runs"
+            )
+          })
+        )
+      })
+    )
+  })
+)
+
+highlight_data$Stage <- factor(
+  highlight_data$Stage,
+  levels = c("Before", "After")
+)
+
+ggplot2::ggplot(
+  highlight_data,
+  ggplot2::aes(x = Intensity, group = Run)
+) +
+  ggplot2::geom_density(
+    data = function(d) d[d$Highlight == "Other runs", ],
+    color = "grey75",
+    linewidth = 0.3,
+    alpha = 0.4
+  ) +
+  ggplot2::geom_density(
+    data = function(d) d[d$Highlight == "Suspected outlier", ],
+    color = "red",
+    linewidth = 1.1
+  ) +
+  ggplot2::facet_grid(
+    Software ~ Stage,
+    scales = "free"
+  ) +
+  ggplot2::labs(
+    title = "Investigating the suspected outlier run",
+    subtitle = target_run,
+    x = "Log2 precursor intensity",
+    y = "Density"
+  ) +
+  ggplot2::theme_classic(base_size = 12)
+
+
+
+```
+
+### Removing outlier run
+One LC-MS run (Group1_c-jun_KO_1) exhibited an atypical precursor intensity distribution across multiple DIA analysis pipelines, most prominently in AlphaDIA and DIA-NN. Given the consistency of this observation across software tools and the availability of additional replicates for the corresponding condition, the run was excluded from downstream quantitative analysis. Normalization was subsequently recalculated using the remaining 83 runs.
+
+```{r exclude_outlier_and_renormalize, message=FALSE}
+# ============================================================
+# Exclude shared QC outlier and repeat normalization
+# ============================================================
+
+excluded_run <- "Group1_c-jun_KO_1"
+
+qf_object_names <- c(
+  AlphaDIA = "qf_alpha",
+  DIANN = "qf_diann",
+  Spectronaut = "qf_spectro",
+  MaxDIA = "qf_maxdia"
+)
+
+# Record the exclusion for reproducibility
+qc_exclusions <- data.frame(
+  Run = excluded_run,
+  Reason = paste(
+    "Atypical precursor intensity distribution across",
+    "multiple DIA analysis pipelines"
+  )
+)
+
+# Check that the run exists exactly once in every software
+for (software in names(qf_object_names)) {
+
+  qf_one <- get(qf_object_names[[software]])
+
+  runs <- colnames(qf_one[["precursors_log"]])
+
+  stopifnot(sum(runs == excluded_run) == 1L)
+
+  # Ensure all assays contain the same runs
+  stopifnot(all(vapply(
+    names(qf_one),
+    function(a) identical(colnames(qf_one[[a]]), runs),
+    logical(1)
+  )))
+}
+
+exclusion_summary <- list()
+
+for (software in names(qf_object_names)) {
+
+  message("Processing ", software, "...")
+
+  object_name <- qf_object_names[[software]]
+  qf_one <- get(object_name)
+
+  n_before <- ncol(qf_one[["precursors_log"]])
+
+  # 1. Remove the outlier column from all linked assays
+  keep_runs <- colnames(qf_one[["precursors_log"]]) != excluded_run
+
+  qf_one <- qf_one[, keep_runs, ]
+
+  # 2. Remove previous normalized assay
+  #    (its normalization factors included the excluded run)
+  qf_one <- qf_one[, , names(qf_one) != "precursors_norm"]
+
+  # 3. Recalculate Median of Ratios normalization factors
+  nf_log <- msqrob2::nfLogMedianOfRatios(
+    qf_one,
+    "precursors_log"
+  )
+
+  stopifnot(
+    length(nf_log) == 83L,
+    all(is.finite(nf_log))
+  )
+
+  # 4. Create replacement normalized assay
+  qf_one <- sweep(
+    qf_one,
+    MARGIN = 2,
+    STATS = nf_log,
+    i = "precursors_log",
+    name = "precursors_norm"
+  )
+
+  # 5. Verify results
+  stopifnot(
+    ncol(qf_one[["precursors"]]) == 83L,
+    ncol(qf_one[["precursors_log"]]) == 83L,
+    ncol(qf_one[["precursors_norm"]]) == 83L,
+    !excluded_run %in% colnames(qf_one[["precursors_norm"]]),
+    all(c(
+      "precursors",
+      "precursors_log",
+      "precursors_norm"
+    ) %in% names(qf_one))
+  )
+
+  exclusion_summary[[software]] <- data.frame(
+    Software = software,
+    Runs_Before = n_before,
+    Runs_After = ncol(qf_one[["precursors_norm"]]),
+    Excluded_Run = excluded_run,
+    Min_Factor = min(nf_log),
+    Median_Factor = median(nf_log),
+    Max_Factor = max(nf_log),
+    SD_Factor = sd(nf_log)
+  )
+
+  # 6. Update object in R environment
+  assign(object_name, qf_one, envir = .GlobalEnv)
+
+  # 7. Overwrite existing filtered RDS file
+  saveRDS(qf_one, filtered_qf_files[[software]])
+
+  message(software, ": 83 runs retained and normalization recalculated")
+
+  rm(qf_one, nf_log)
+  gc(verbose = FALSE)
+}
+
+exclusion_summary <- dplyr::bind_rows(exclusion_summary)
+
+print(qc_exclusions)
+print(exclusion_summary)
+
+# Final checks
+sapply(
+  qf_object_names,
+  function(object_name) {
+    ncol(get(object_name)[["precursors_norm"]])
+  }
+)
+```
+The results strengthen the justification for excluding Group1_c-jun_KO_1, particularly for DIA-NN and MaxDIA.
 
 ## Aggregation
 The objective of aggregation is to summarise the precursor-level intensities into a protein expression value. We illustrate the motivation for summarisation using all peptide-level data for one of the spiked UPS proteins. 
