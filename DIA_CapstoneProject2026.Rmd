@@ -785,7 +785,7 @@ for (software in software_names) {
 message("Deduplicated QFeatures cache creation finished.")
 ```
 
-### Recovery qfs
+### 1. Recovery qfs
 ```{r load_qfeatures, message=FALSE}
 # ============================================================
 # Recover cached deduplicated QFeatures objects
@@ -1075,7 +1075,7 @@ for (software in software_names) {
 
 message("All four combined QFeatures objects are ready.")
 ```
-### Recovery qfs
+### 2. Recovery qfs
 
 ```{r recover_combined_qfeatures, message=FALSE}
 # ============================================================
@@ -1165,13 +1165,14 @@ software_names <- c(
   "AlphaDIA", "DIANN", "Spectronaut", "MaxDIA"
 )
 
-filtered_qf_files <- setNames(
-  file.path(
-    cache_dir,
-    paste0("qf_", software_names, "_filtered_final.rds")
-  ),
-  software_names
-)
+## there is a conflict between this part and Recovery of protien level qfs
+# filtered_qf_files <- setNames(
+#   file.path(
+#     cache_dir,
+#     paste0("qf_", software_names, "_filtered_final.rds")
+#   ),
+#   software_names
+# )
 
 filter_summary <- list()
 
@@ -2356,6 +2357,635 @@ sapply(
 ```
 The results strengthen the justification for excluding Group1_c-jun_KO_1, particularly for DIA-NN and MaxDIA (Run chunk 26 to re-check).
 
+
+## NIMAA analysis of precursor detection
+
+Precursor detection was represented as a binary precursor-by-run matrix (observed = 1; missing = 0). The NIMAA-style `Rectangular_element_max` method was applied to all precursor features to identify a fully observed rectangular submatrix. The efficient implementation was checked against the original NIMAA output on a 5,000-precursor test matrix.
+
+```{r nimaa-precursor-incidence}
+# Binary precursor-by-run incidence matrices:
+# 1 = observed finite abundance; 0 = missing
+
+nimaa_incidence <- lapply(qf_nimaa, function(qf) {
+  x <- SummarizedExperiment::assay(qf[["precursors"]])
+
+  # Preserve feature and sample identifiers
+  observed <- is.finite(x)
+
+  # Store as integer values for incidence analysis
+  storage.mode(observed) <- "integer"
+
+  observed
+})
+
+# Validate matrix dimensions and observed fractions
+nimaa_incidence_check <- do.call(
+  rbind,
+  lapply(names(nimaa_incidence), function(software) {
+    x <- nimaa_incidence[[software]]
+
+    data.frame(
+      Software = software,
+      Precursors = nrow(x),
+      Runs = ncol(x),
+      Observed_pct = round(100 * mean(x), 2),
+      Missing_pct = round(100 * (1 - mean(x)), 2),
+      Complete_precursors = sum(rowSums(x) == ncol(x)),
+      Complete_runs = sum(colSums(x) == nrow(x))
+    )
+  })
+)
+
+print(nimaa_incidence_check, row.names = FALSE)
+```
+
+```{r nimaa-fast-functions}
+arrange_nimaa_matrix <- function(x) {
+
+  # Step 1: Sort precursors by increasing missingness
+  row_order <- order(rowSums(x == 0L))
+  x <- x[row_order, , drop = FALSE]
+
+  # Step 2: Sort runs by increasing missingness
+  col_order <- order(colSums(x == 0L))
+  x <- x[, col_order, drop = FALSE]
+
+  # Step 3: Lexicographic ordering of precursor detection patterns
+  # Equivalent in intent to NIMAA's arrange_if() step
+  row_order3 <- do.call(
+    order,
+    c(
+      lapply(seq_len(ncol(x)), function(j) -x[, j]),
+      list(method = "radix")
+    )
+  )
+
+  x[row_order3, , drop = FALSE]
+}
+
+# NIMAA-style largest top-left complete rectangle
+find_nimaa_rectangle <- function(x) {
+
+  first_missing <- max.col(x == 0L, ties.method = "first")
+
+  # Correct rows containing no missing measurements
+  complete_rows <- rowSums(x == 0L) == 0L
+  first_missing[complete_rows] <- ncol(x) + 1L
+
+  widths <- first_missing - 1L
+
+  # A rectangle must be complete across ALL rows above its bottom edge
+  widths <- cummin(widths)
+
+  areas <- seq_len(nrow(x)) * widths
+  best_row <- which.max(areas)
+
+  list(
+    rows = best_row,
+    cols = widths[best_row],
+    cells = areas[best_row]
+  )
+}
+```
+
+```{r nimaa-full-element-max}
+nimaa_full_arranged <- lapply(nimaa_incidence, arrange_nimaa_matrix)
+
+nimaa_full_rectangles <- dplyr::bind_rows(
+  lapply(names(nimaa_full_arranged), function(software) {
+    result <- find_nimaa_rectangle(nimaa_full_arranged[[software]])
+    data.frame(
+      Software = software,
+      Method = "Rectangular_element_max",
+      Precursors = result$rows,
+      Runs = result$cols,
+      Complete_cells = result$cells
+    )
+  })
+)
+
+# Confirm each selected rectangle contains only observed values
+stopifnot(all(vapply(names(nimaa_full_arranged), function(s) {
+  x <- nimaa_full_arranged[[s]]
+  r <- nimaa_full_rectangles[nimaa_full_rectangles$Software == s, ]
+  all(x[seq_len(r$Precursors), seq_len(r$Runs), drop = FALSE] == 1L)
+}, logical(1))))
+
+print(nimaa_full_rectangles, row.names = FALSE)
+```
+
+```{r nimaa-element-max-figure-fixed, fig.width=14, fig.height=9, dpi=200}
+library(ggplot2)
+library(patchwork)
+dir.create("figures", showWarnings = FALSE)
+
+# Consistent pipeline colors used throughout the capstone
+software_colors <- c(
+  "AlphaDIA"   = "#0072B2",
+  "DIA-NN"     = "#E69F00",
+  "Spectronaut" = "#009E73",
+  "MaxDIA"     = "#CC79A7"
+)
+
+plot_nimaa_element_max <- function(software) {
+
+  # Full arranged precursor incidence matrix
+  x <- nimaa_full_arranged[[software]]
+
+  # NIMAA element-max rectangle
+  rect <- nimaa_full_rectangles |>
+    dplyr::filter(
+      Software == software,
+      Method == "Rectangular_element_max"
+    )
+
+  stopifnot(nrow(rect) == 1L)
+
+  # Raster:
+  # Observed = pipeline-specific color
+  # Missing  = white
+  # Reverse row order to align with the reversed y-axis
+  raster_image <- as.raster(
+    ifelse(
+      t(x)[ncol(x):1, , drop = FALSE] == 1L,
+      software_colors[[software]],
+      "#FFFFFF"
+    )
+  )
+
+  ggplot() +
+
+    # Full precursor-by-run incidence matrix
+    annotation_raster(
+      raster_image,
+      xmin = 0.5,
+      xmax = nrow(x) + 0.5,
+      ymin = 0.5,
+      ymax = ncol(x) + 0.5
+    ) +
+
+    # Highlight complete element-max rectangle
+          annotate(
+      "rect",
+      xmin = 0.5,
+      xmax = rect$Precursors + 0.5,
+      ymin = ncol(x) - rect$Runs + 0.5,
+      ymax = ncol(x) + 0.5,
+      fill = "#666666",
+      alpha = 0.22,
+      colour = "#333333",
+      linewidth = 0.7
+    ) +
+
+    # Full precursor range (prevents cropping)
+    scale_x_continuous(
+      limits = c(0.5, nrow(x) + 0.5),
+      labels = scales::label_number(big.mark = ","),
+      expand = c(0, 0)
+    ) +
+
+    # First arranged run appears at the top
+    scale_y_reverse(
+      limits = c(ncol(x) + 0.5, 0.5),
+      breaks = c(1, 20, 40, 60, 83),
+      expand = c(0, 0)
+    ) +
+
+    labs(
+      title = software,
+      subtitle = paste0(
+        "Element-max: ",
+        format(rect$Precursors, big.mark = ","),
+        " precursors × ",
+        rect$Runs,
+        " runs"
+      ),
+      x = "Arranged precursors",
+      y = "Arranged runs"
+    ) +
+
+    theme_classic(base_size = 10) +
+
+    theme(
+      plot.title = element_text(
+        face = "bold",
+        size = 13
+      ),
+      plot.subtitle = element_text(
+        size = 10
+      ),
+      axis.title = element_text(
+        size = 10
+      ),
+      axis.text = element_text(
+        size = 9
+      ),
+      panel.border = element_rect(
+        colour = "grey50",
+        fill = NA,
+        linewidth = 0.3
+      ),
+      plot.margin = margin(8, 8, 8, 8)
+    )
+}
+
+# Four-panel comparison
+nimaa_element_max_figure <- (
+  plot_nimaa_element_max("AlphaDIA") |
+  plot_nimaa_element_max("DIA-NN")
+) / (
+  plot_nimaa_element_max("Spectronaut") |
+  plot_nimaa_element_max("MaxDIA")
+) +
+  patchwork::plot_annotation(
+    title = "NIMAA: Maximum complete precursor submatrices",
+    subtitle = paste0(
+      "Rectangular_element_max | ",
+      "83 runs per pipeline"
+    )
+  )
+
+# Display figure
+print(nimaa_element_max_figure)
+
+# Save publication-quality PNG
+ggplot2::ggsave(
+  filename = "figures/NIMAA_element_max_comparison.png",
+  plot = nimaa_element_max_figure,
+  width = 14,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+```{r nimaa-element-max-lollipop, fig.width=15, fig.height=11, dpi=300}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+
+# Pipeline order
+pipeline_order <- c(
+  "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
+)
+
+# Prepare NIMAA comparison data
+nimaa_lollipop_data <- nimaa_full_rectangles |>
+  filter(Method == "Rectangular_element_max") |>
+  mutate(
+    Original_precursors = vapply(
+      Software,
+      function(s) nrow(nimaa_incidence[[s]]),
+      integer(1)
+    ),
+    Original_runs = vapply(
+      Software,
+      function(s) ncol(nimaa_incidence[[s]]),
+      integer(1)
+    ),
+    Original_cells = Original_precursors * Original_runs,
+
+    # Percentage of original matrix represented by complete submatrix
+    Matrix_pct = 100 * Complete_cells / Original_cells,
+
+    # Percentage of original precursor features in complete submatrix
+    Precursor_pct = 100 * Precursors / Original_precursors,
+
+    Software = factor(
+      Software,
+      levels = rev(pipeline_order)
+    )
+  )
+
+# Reusable lollipop plotting function
+make_nimaa_lollipop <- function(data, variable, title,
+                                x_label, percent = FALSE) {
+
+  ggplot(
+    data,
+    aes(
+      x = .data[[variable]],
+      y = Software,
+      colour = Software
+    )
+  ) +
+    geom_segment(
+      aes(
+        x = 0,
+        xend = .data[[variable]],
+        yend = Software
+      ),
+      linewidth = 1.4,
+      alpha = 0.75
+    ) +
+    geom_point(size = 5) +
+    geom_text(
+      aes(
+        label = if (percent) {
+          sprintf("%.1f%%", .data[[variable]])
+        } else {
+          scales::comma(.data[[variable]])
+        }
+      ),
+      hjust = -0.18,
+      size = 5,
+      fontface = "bold",
+      colour = "black"
+    ) +
+    scale_colour_manual(values = software_colors) +
+    scale_x_continuous(
+      labels = if (percent) {
+        scales::label_number(suffix = "%")
+      } else {
+        scales::label_comma()
+      },
+      expand = expansion(mult = c(0, 0.32))
+    ) +
+    labs(
+      title = title,
+      x = x_label,
+      y = NULL
+    ) +
+    theme_classic(base_size = 15) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(
+        face = "bold",
+        size = 17,
+        margin = margin(b = 12)
+      ),
+      axis.title.x = element_text(
+        size = 15,
+        margin = margin(t = 10)
+      ),
+      axis.text.x = element_text(size = 13),
+      axis.text.y = element_text(
+        face = "bold",
+        size = 14
+      ),
+      panel.grid.major.x = element_line(
+        colour = "grey90",
+        linewidth = 0.4
+      ),
+      plot.margin = margin(12, 18, 12, 12)
+    )
+}
+
+# A. Total original precursor features
+p_original <- make_nimaa_lollipop(
+  nimaa_lollipop_data,
+  "Original_precursors",
+  "A. Original precursor features",
+  "Number of precursors"
+)
+
+# B. Size of complete submatrix
+p_complete <- make_nimaa_lollipop(
+  nimaa_lollipop_data,
+  "Complete_cells",
+  "B. Complete submatrix size",
+  "Complete precursor × run cells"
+)
+
+# C. Percentage of original matrix represented
+p_matrix_pct <- make_nimaa_lollipop(
+  nimaa_lollipop_data,
+  "Matrix_pct",
+  "C. Complete submatrix as a percentage of original matrix",
+  "Original matrix represented (%)",
+  percent = TRUE
+)
+
+# D. Percentage of original precursor features represented
+p_precursor_pct <- make_nimaa_lollipop(
+  nimaa_lollipop_data,
+  "Precursor_pct",
+  "D. Precursors in complete submatrix",
+  "Original precursors represented (%)",
+  percent = TRUE
+)
+
+# Combine into a 2 × 2 figure
+nimaa_lollipop_figure <- (
+  p_original | p_complete
+) / (
+  p_matrix_pct | p_precursor_pct
+) +
+  patchwork::plot_annotation(
+    title = "NIMAA: Complete submatrix comparison across DIA pipelines",
+    subtitle = "Rectangular_element_max | Original precursor matrices across 83 runs",
+    theme = theme(
+      plot.title = element_text(
+        size = 21,
+        face = "bold"
+      ),
+      plot.subtitle = element_text(
+        size = 15,
+        margin = margin(b = 15)
+      )
+    )
+  )
+
+print(nimaa_lollipop_figure)
+
+# Save high-resolution PNG
+ggsave(
+  filename = "figures/NIMAA_element_max_lollipop.png",
+  plot = nimaa_lollipop_figure,
+  width = 15,
+  height = 11,
+  dpi = 300,
+  bg = "white"
+)
+
+# Print numerical summary
+print(
+  as.data.frame(
+    nimaa_lollipop_data |>
+      select(
+        Software,
+        Original_precursors,
+        Precursors,
+        Runs,
+        Complete_cells,
+        Matrix_pct,
+        Precursor_pct
+      ) |>
+      mutate(
+        across(
+          c(Matrix_pct, Precursor_pct),
+          ~ round(.x, 2)
+        )
+      )
+  ),
+  row.names = FALSE
+)
+```
+
+```{r nimaa-nestedness-repeated}
+library(dplyr)
+library(ggplot2)
+
+set.seed(42)
+
+n_repeats <- 20
+n_precursors <- 5000
+
+nimaa_nestedness_repeated <- dplyr::bind_rows(
+  lapply(names(nimaa_incidence), function(software) {
+
+    x <- nimaa_incidence[[software]]
+
+    dplyr::bind_rows(
+      lapply(seq_len(n_repeats), function(i) {
+
+        message(
+          software, " | repetition ", i, "/", n_repeats
+        )
+
+        selected <- sample.int(
+          nrow(x),
+          size = min(n_precursors, nrow(x)),
+          replace = FALSE
+        )
+
+        temperature <- bipartite::nested(
+          x[selected, , drop = FALSE],
+          method = "binmatnest"
+        )
+
+        data.frame(
+          Software = software,
+          Repetition = i,
+          Nestedness_temperature = as.numeric(temperature)
+        )
+      })
+    )
+  })
+)
+
+# Summarise repeated nestedness estimates
+nimaa_nestedness_summary <- nimaa_nestedness_repeated |>
+  group_by(Software) |>
+  summarise(
+    Mean_temperature = mean(Nestedness_temperature, na.rm = TRUE),
+    SD_temperature = sd(Nestedness_temperature, na.rm = TRUE),
+    Min_temperature = min(Nestedness_temperature, na.rm = TRUE),
+    Max_temperature = max(Nestedness_temperature, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(
+    across(
+      c(Mean_temperature, SD_temperature,
+        Min_temperature, Max_temperature),
+      ~ round(.x, 2)
+    )
+  )
+
+print(as.data.frame(nimaa_nestedness_summary), row.names = FALSE)
+```
+```{r nimaa-nestedness-boxplot, fig.width=10, fig.height=6, dpi=300}
+library(ggplot2)
+library(dplyr)
+
+pipeline_order <- c(
+  "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
+)
+
+# Use unrounded values for plotting
+nestedness_plot_summary <- nimaa_nestedness_repeated |>
+  group_by(Software) |>
+  summarise(
+    Mean = mean(Nestedness_temperature),
+    SD = sd(Nestedness_temperature),
+    .groups = "drop"
+  ) |>
+  mutate(
+    Software = factor(Software, levels = rev(pipeline_order)),
+    Label = sprintf("%.2f ± %.2f", Mean, SD)
+  )
+
+nestedness_plot_data <- nimaa_nestedness_repeated |>
+  mutate(
+    Software = factor(Software, levels = rev(pipeline_order))
+  )
+
+nimaa_nestedness_figure <- ggplot() +
+  # Individual random-sampling repetitions
+  geom_jitter(
+    data = nestedness_plot_data,
+    aes(x = Nestedness_temperature, y = Software,
+        colour = Software),
+    height = 0.13,
+    width = 0,
+    alpha = 0.30,
+    size = 2
+  ) +
+  # Mean ± SD
+  geom_errorbarh(
+    data = nestedness_plot_summary,
+    aes(
+      y = Software,
+      xmin = Mean - SD,
+      xmax = Mean + SD,
+      colour = Software
+    ),
+    height = 0.20,
+    linewidth = 1.2
+  ) +
+  geom_point(
+    data = nestedness_plot_summary,
+    aes(x = Mean, y = Software, colour = Software),
+    size = 4.5
+  ) +
+  geom_text(
+    data = nestedness_plot_summary,
+    aes(x = Mean + SD + 0.8, y = Software, label = Label),
+    hjust = 0,
+    size = 4.5,
+    fontface = "bold"
+  ) +
+  scale_colour_manual(values = software_colors) +
+  scale_x_continuous(
+    limits = c(0, 36),
+    breaks = seq(0, 35, 5),
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+  labs(
+    title = "Precursor-level nestedness across DIA pipelines",
+    subtitle = "20 random samples of 5,000 precursors per pipeline",
+    x = "Nestedness temperature (lower = more nested)",
+    y = NULL
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 17),
+    plot.subtitle = element_text(size = 12),
+    axis.text.y = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_line(
+      colour = "grey90", linewidth = 0.4
+    ),
+    plot.margin = margin(10, 15, 10, 10)
+  )
+
+print(nimaa_nestedness_figure)
+
+ggsave(
+  "NIMAA_precursor_nestedness.png",
+  plot = nimaa_nestedness_figure,
+  width = 10,
+  height = 5.5,
+  dpi = 300,
+  bg = "white"
+)
+```
+Spectronaut had the largest complete submatrix (6.25 million cells; 41.35% of its original matrix), including all 83 runs. DIA-NN included the greatest proportion of original precursors (45.66%) but only 42 runs. AlphaDIA included 81 runs and 20.14% of original matrix cells; MaxDIA included 58 runs and 12.45%.
+
+Nestedness temperature was estimated using 5,000 randomly sampled precursors per pipeline, with all 83 runs. Spectronaut had the lowest temperature (6.96), followed by DIA-NN (17.71), AlphaDIA (23.78), and MaxDIA (28.50). Lower values indicate more nested detection patterns. Overall, Spectronaut showed the most complete and nested detection structure in this analysis. Differences in precursor sets and matrix fill limit direct interpretation of nestedness as quantitative performance.
+
+Repeated sampling (20 iterations of 5,000 precursors) showed consistent differences in nestedness temperature across pipelines. Spectronaut had the lowest mean temperature (6.84 ± 0.22), followed by DIA-NN (18.08 ± 0.33), AlphaDIA (23.49 ± 0.35), and MaxDIA (28.50 ± 0.42). The low variability across repetitions indicates stable estimates under the sampling procedure, with Spectronaut exhibiting the most strongly nested precursor detection pattern.
 ## Aggregation
 The objective of aggregation is to summarise the precursor-level intensities into a protein expression value. The fact that different precursors have different intensities (2.), may be inconsistently identified (3.) and/or quantified (4.), and show sample correlations (5.) can lead to bias if we use simple summarisation approaches such as summing or averaging the precursor intensities for each sample. Instead, we will resort to more advanced summarisation approaches to accommodate for these issues. Here, we summarise the precursor-level data into protein intensities usin`g maxLFQ`. It is implemented in the `maxLFQ` function of the `iq` package.
 
@@ -2452,7 +3082,7 @@ lapply(
 )
 ```
 
-### Recovery qfs
+### 3. Recovery qfs
 ```{r recover_protein_qfeatures, message=FALSE}
 # ============================================================
 # Recover saved protein-level QFeatures objects
@@ -2607,6 +3237,64 @@ The data processing is complete.
 
 # Data exploration and QC
 Data exploration aims to highlight the main sources of variation in the data prior to data modelling and can pinpoint to outlying or off-behaving samples.
+
+## NIMAA analysis of proteins
+
+```{r nimaa-protein-incidence}
+library(dplyr)
+library(SummarizedExperiment)
+
+# QFeatures objects after protein aggregation
+qf_nimaa_protein <- list(
+  "AlphaDIA" = qf_alpha,
+  "DIA-NN" = qf_diann,
+  "Spectronaut" = qf_spectro,
+  "MaxDIA" = qf_maxdia
+)
+
+# Construct protein × run binary incidence matrices
+# 1 = observed finite abundance; 0 = missing
+nimaa_protein_incidence <- lapply(
+  qf_nimaa_protein,
+  function(qf) {
+
+    protein_assay <- SummarizedExperiment::assay(
+      qf[["proteins"]]
+    )
+
+    incidence <- matrix(
+      as.integer(is.finite(protein_assay)),
+      nrow = nrow(protein_assay),
+      ncol = ncol(protein_assay),
+      dimnames = dimnames(protein_assay)
+    )
+
+    incidence
+  }
+)
+
+# Check dimensions and missingness
+nimaa_protein_check <- bind_rows(
+  lapply(names(nimaa_protein_incidence), function(s) {
+
+    x <- nimaa_protein_incidence[[s]]
+
+    data.frame(
+      Software = s,
+      Proteins = nrow(x),
+      Runs = ncol(x),
+      Observed_pct = round(100 * mean(x), 2),
+      Missing_pct = round(100 * (1 - mean(x)), 2),
+      Complete_proteins = sum(rowSums(x) == ncol(x))
+    )
+  })
+)
+
+print(as.data.frame(nimaa_protein_check), row.names = FALSE)
+```
+
+
+
 
 ## Normalized precursor intensity density plots
 ```{r prepare_marginal_qc, message=FALSE}
