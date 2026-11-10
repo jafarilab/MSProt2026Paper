@@ -959,6 +959,7 @@ Inspection of the precursor-level QFeatures objects revealed differences in how 
 qf_alpha <- zeroIsNA(qf_alpha, names(qf_alpha))
 ```
 
+
 ## Joining assay
 Combine 84 run-specific assays into one precursor assay for each DIA software:
 
@@ -2619,207 +2620,81 @@ ggplot2::ggsave(
 )
 ```
 
-```{r nimaa-element-max-lollipop, fig.width=15, fig.height=11, dpi=300}
+```{r nimaa-precursor-summary-lollipop, fig.width=12, fig.height=5.5, dpi=300}
 library(dplyr)
 library(ggplot2)
-library(patchwork)
 library(scales)
 
-# Pipeline order
-pipeline_order <- c(
-  "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
-)
-
-# Prepare NIMAA comparison data
-nimaa_lollipop_data <- nimaa_full_rectangles |>
-  filter(Method == "Rectangular_element_max") |>
+precursor_plot_data <- nimaa_lollipop_data |>
   mutate(
-    Original_precursors = vapply(
-      Software,
-      function(s) nrow(nimaa_incidence[[s]]),
-      integer(1)
-    ),
-    Original_runs = vapply(
-      Software,
-      function(s) ncol(nimaa_incidence[[s]]),
-      integer(1)
-    ),
-    Original_cells = Original_precursors * Original_runs,
-
-    # Percentage of original matrix represented by complete submatrix
-    Matrix_pct = 100 * Complete_cells / Original_cells,
-
-    # Percentage of original precursor features in complete submatrix
-    Precursor_pct = 100 * Precursors / Original_precursors,
-
     Software = factor(
-      Software,
-      levels = rev(pipeline_order)
+      as.character(Software),
+      levels = rev(c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"))
+    ),
+    Label = sprintf(
+      "%.1f%% matrix  |  %s precursors (%.1f%%)  |  %d/83 runs",
+      Matrix_pct,
+      scales::comma(Precursors),
+      Precursor_pct,
+      Runs
     )
   )
 
-# Reusable lollipop plotting function
-make_nimaa_lollipop <- function(data, variable, title,
-                                x_label, percent = FALSE) {
-
-  ggplot(
-    data,
-    aes(
-      x = .data[[variable]],
-      y = Software,
-      colour = Software
-    )
-  ) +
-    geom_segment(
-      aes(
-        x = 0,
-        xend = .data[[variable]],
-        yend = Software
-      ),
-      linewidth = 1.4,
-      alpha = 0.75
-    ) +
-    geom_point(size = 5) +
-    geom_text(
-      aes(
-        label = if (percent) {
-          sprintf("%.1f%%", .data[[variable]])
-        } else {
-          scales::comma(.data[[variable]])
-        }
-      ),
-      hjust = -0.18,
-      size = 5,
-      fontface = "bold",
-      colour = "black"
-    ) +
-    scale_colour_manual(values = software_colors) +
-    scale_x_continuous(
-      labels = if (percent) {
-        scales::label_number(suffix = "%")
-      } else {
-        scales::label_comma()
-      },
-      expand = expansion(mult = c(0, 0.32))
-    ) +
-    labs(
-      title = title,
-      x = x_label,
-      y = NULL
-    ) +
-    theme_classic(base_size = 15) +
-    theme(
-      legend.position = "none",
-      plot.title = element_text(
-        face = "bold",
-        size = 17,
-        margin = margin(b = 12)
-      ),
-      axis.title.x = element_text(
-        size = 15,
-        margin = margin(t = 10)
-      ),
-      axis.text.x = element_text(size = 13),
-      axis.text.y = element_text(
-        face = "bold",
-        size = 14
-      ),
-      panel.grid.major.x = element_line(
-        colour = "grey90",
-        linewidth = 0.4
-      ),
-      plot.margin = margin(12, 18, 12, 12)
-    )
-}
-
-# A. Total original precursor features
-p_original <- make_nimaa_lollipop(
-  nimaa_lollipop_data,
-  "Original_precursors",
-  "A. Original precursor features",
-  "Number of precursors"
-)
-
-# B. Size of complete submatrix
-p_complete <- make_nimaa_lollipop(
-  nimaa_lollipop_data,
-  "Complete_cells",
-  "B. Complete submatrix size",
-  "Complete precursor × run cells"
-)
-
-# C. Percentage of original matrix represented
-p_matrix_pct <- make_nimaa_lollipop(
-  nimaa_lollipop_data,
-  "Matrix_pct",
-  "C. Complete submatrix as a percentage of original matrix",
-  "Original matrix represented (%)",
-  percent = TRUE
-)
-
-# D. Percentage of original precursor features represented
-p_precursor_pct <- make_nimaa_lollipop(
-  nimaa_lollipop_data,
-  "Precursor_pct",
-  "D. Precursors in complete submatrix",
-  "Original precursors represented (%)",
-  percent = TRUE
-)
-
-# Combine into a 2 × 2 figure
-nimaa_lollipop_figure <- (
-  p_original | p_complete
-) / (
-  p_matrix_pct | p_precursor_pct
+nimaa_precursor_summary_figure <- ggplot(
+  precursor_plot_data,
+  aes(
+    x = Matrix_pct,
+    y = Software,
+    colour = Software
+  )
 ) +
-  patchwork::plot_annotation(
-    title = "NIMAA: Complete submatrix comparison across DIA pipelines",
-    subtitle = "Rectangular_element_max | Original precursor matrices across 83 runs",
-    theme = theme(
-      plot.title = element_text(
-        size = 21,
-        face = "bold"
-      ),
-      plot.subtitle = element_text(
-        size = 15,
-        margin = margin(b = 15)
-      )
-    )
+  geom_segment(
+    aes(x = 0, xend = Matrix_pct, yend = Software),
+    linewidth = 1.5,
+    alpha = 0.8
+  ) +
+  geom_point(size = 5.5) +
+  geom_text(
+    aes(label = Label),
+    hjust = -0.08,
+    size = 4,
+    fontface = "bold",
+    colour = "black"
+  ) +
+  scale_colour_manual(values = software_colors) +
+  scale_x_continuous(
+    limits = c(0, 105),
+    breaks = seq(0, 50, 10),
+    labels = function(x) paste0(x, "%"),
+    expand = c(0, 0)
+  ) +
+  labs(
+    title = "Precursor-level NIMAA: Complete submatrix comparison",
+    subtitle = "Element-max heuristic | 83 original runs per pipeline",
+    x = "Original precursor matrix represented (%)",
+    y = NULL
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 17),
+    plot.subtitle = element_text(size = 12),
+    axis.text.y = element_text(face = "bold", size = 13),
+    panel.grid.major.x = element_line(
+      colour = "grey90", linewidth = 0.4
+    ),
+    plot.margin = margin(12, 20, 12, 12)
   )
 
-print(nimaa_lollipop_figure)
+print(nimaa_precursor_summary_figure)
 
-# Save high-resolution PNG
 ggsave(
-  filename = "figures/NIMAA_element_max_lollipop.png",
-  plot = nimaa_lollipop_figure,
-  width = 15,
-  height = 11,
+  "NIMAA_precursor_summary_lollipop.png",
+  plot = nimaa_precursor_summary_figure,
+  width = 12,
+  height = 5.5,
   dpi = 300,
   bg = "white"
-)
-
-# Print numerical summary
-print(
-  as.data.frame(
-    nimaa_lollipop_data |>
-      select(
-        Software,
-        Original_precursors,
-        Precursors,
-        Runs,
-        Complete_cells,
-        Matrix_pct,
-        Precursor_pct
-      ) |>
-      mutate(
-        across(
-          c(Matrix_pct, Precursor_pct),
-          ~ round(.x, 2)
-        )
-      )
-  ),
-  row.names = FALSE
 )
 ```
 
@@ -3097,7 +2972,7 @@ software_names <- c(
 filtered_qf_files <- setNames(
   file.path(
     cache_dir,
-    paste0("qf_", software_names, "_filtered_final.rds")
+    paste0("qf_", software_names, "_filtered_final_pr.rds")
   ),
   software_names
 )
@@ -3292,8 +3167,271 @@ nimaa_protein_check <- bind_rows(
 
 print(as.data.frame(nimaa_protein_check), row.names = FALSE)
 ```
+```{r nimaa-protein-rectangles}
+# Apply the same NIMAA arrangement and element-max rectangle method
+# to the full protein-level incidence matrices.
 
+nimaa_protein_arranged <- lapply(
+  nimaa_protein_incidence,
+  arrange_nimaa_matrix
+)
 
+nimaa_protein_rectangles <- dplyr::bind_rows(
+  lapply(names(nimaa_protein_arranged), function(software) {
+
+    x <- nimaa_protein_arranged[[software]]
+    rect <- find_nimaa_rectangle(x)
+
+    stopifnot(
+      all(x[
+        seq_len(rect$rows),
+        seq_len(rect$cols),
+        drop = FALSE
+      ] == 1L)
+    )
+
+    data.frame(
+      Software = software,
+      Original_proteins = nrow(x),
+      Original_runs = ncol(x),
+      Proteins = rect$rows,
+      Runs = rect$cols,
+      Complete_cells = rect$cells,
+      Matrix_pct = round(
+        100 * rect$cells / length(x), 2
+      ),
+      Protein_pct = round(
+        100 * rect$rows / nrow(x), 2
+      )
+    )
+  })
+)
+
+print(
+  as.data.frame(nimaa_protein_rectangles),
+  row.names = FALSE
+)
+```
+```{r nimaa-protein-incidence-figure, fig.width=14, fig.height=9, dpi=300}
+library(ggplot2)
+library(patchwork)
+
+plot_nimaa_protein <- function(software) {
+
+  x <- nimaa_protein_arranged[[software]]
+
+  rect <- nimaa_protein_rectangles |>
+    dplyr::filter(Software == software)
+
+  stopifnot(nrow(rect) == 1L)
+
+  raster_image <- as.raster(
+    ifelse(
+      t(x)[ncol(x):1, , drop = FALSE] == 1L,
+      software_colors[[software]],
+      "#FFFFFF"
+    )
+  )
+
+  ggplot() +
+    annotation_raster(
+      raster_image,
+      xmin = 0.5,
+      xmax = nrow(x) + 0.5,
+      ymin = 0.5,
+      ymax = ncol(x) + 0.5
+    ) +
+    annotate(
+      "rect",
+      xmin = 0.5,
+      xmax = rect$Proteins + 0.5,
+      ymin = ncol(x) - rect$Runs + 0.5,
+      ymax = ncol(x) + 0.5,
+      fill = "#666666",
+      alpha = 0.22,
+      colour = "#333333",
+      linewidth = 0.7
+    ) +
+    scale_x_continuous(
+      limits = c(0.5, nrow(x) + 0.5),
+      labels = scales::label_comma(),
+      expand = c(0, 0)
+    ) +
+    scale_y_reverse(
+      limits = c(ncol(x) + 0.5, 0.5),
+      breaks = c(1, 20, 40, 60, 83),
+      expand = c(0, 0)
+    ) +
+    labs(
+      title = software,
+      subtitle = paste0(
+        scales::comma(rect$Proteins),
+        " proteins × ", rect$Runs, " runs"
+      ),
+      x = "Arranged proteins",
+      y = "Arranged runs"
+    ) +
+    theme_classic(base_size = 11) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      plot.subtitle = element_text(size = 11),
+      panel.border = element_rect(
+        colour = "grey50", fill = NA, linewidth = 0.3
+      )
+    )
+}
+
+nimaa_protein_figure <- (
+  plot_nimaa_protein("AlphaDIA") |
+  plot_nimaa_protein("DIA-NN")
+) / (
+  plot_nimaa_protein("Spectronaut") |
+  plot_nimaa_protein("MaxDIA")
+) +
+  patchwork::plot_annotation(
+    title = "NIMAA: Complete protein submatrices",
+    subtitle = "Element-max heuristic | 83 original runs per pipeline"
+  )
+
+print(nimaa_protein_figure)
+
+ggsave(
+  "NIMAA_protein_element_max.png",
+  nimaa_protein_figure,
+  width = 14,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+```{r nimaa-protein-summary-lollipop, fig.width=11, fig.height=5.5, dpi=300}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+protein_plot_data <- nimaa_protein_rectangles |>
+  mutate(
+    Software = factor(
+      Software,
+      levels = rev(c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"))
+    ),
+    Label = sprintf(
+      "%.1f%%  |  %s proteins  |  %d/83 runs",
+      Protein_pct,
+      scales::comma(Proteins),
+      Runs
+    )
+  )
+
+nimaa_protein_summary_figure <- ggplot(
+  protein_plot_data,
+  aes(
+    x = Protein_pct,
+    y = Software,
+    colour = Software
+  )
+) +
+  geom_segment(
+    aes(
+      x = 0,
+      xend = Protein_pct,
+      yend = Software
+    ),
+    linewidth = 1.5,
+    alpha = 0.8
+  ) +
+  geom_point(size = 5.5) +
+  geom_text(
+    aes(label = Label),
+    hjust = -0.08,
+    size = 4.2,
+    fontface = "bold",
+    colour = "black"
+  ) +
+  scale_colour_manual(values = software_colors) +
+  scale_x_continuous(
+    limits = c(0, 145),
+    breaks = seq(0, 100, 20),
+    labels = function(x) paste0(x, "%"),
+    expand = c(0, 0)
+  ) +
+  labs(
+    title = "Protein-level NIMAA: Complete submatrix comparison",
+    subtitle = "Complete proteins and runs represented by the element-max submatrix",
+    x = "Original proteins represented (%)",
+    y = NULL
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(
+      face = "bold",
+      size = 17
+    ),
+    plot.subtitle = element_text(size = 12),
+    axis.text.y = element_text(
+      face = "bold",
+      size = 13
+    ),
+    axis.text.x = element_text(size = 12),
+    panel.grid.major.x = element_line(
+      colour = "grey90",
+      linewidth = 0.4
+    ),
+    plot.margin = margin(12, 20, 12, 12)
+  )
+
+print(nimaa_protein_summary_figure)
+
+ggsave(
+  "NIMAA_protein_summary_lollipop.png",
+  plot = nimaa_protein_summary_figure,
+  width = 11,
+  height = 5.5,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+```{r nimaa-protein-nestedness}
+# Full protein-level nestedness temperature
+# All proteins and all 83 runs
+
+nimaa_protein_nestedness <- dplyr::bind_rows(
+  lapply(names(nimaa_protein_incidence), function(software) {
+
+    message("Calculating protein nestedness: ", software)
+
+    x <- nimaa_protein_incidence[[software]]
+
+    elapsed <- system.time({
+      temperature <- bipartite::nested(
+        x,
+        method = "binmatnest"
+      )
+    })
+
+    data.frame(
+      Software = software,
+      Proteins = nrow(x),
+      Runs = ncol(x),
+      Nestedness_temperature = as.numeric(temperature),
+      Runtime_seconds = unname(elapsed["elapsed"])
+    )
+  })
+)
+
+print(
+  as.data.frame(nimaa_protein_nestedness),
+  row.names = FALSE
+)
+```
+Protein-level NIMAA analysis showed substantially higher completeness than precursor-level analysis across all four DIA pipelines. **AlphaDIA** produced the largest complete submatrix (8,937 proteins × 82 runs; 77.92% matrix coverage), whereas **Spectronaut** achieved the highest proportional coverage (95.12%), followed by MaxDIA (88.60%), DIA-NN (76.85%), and AlphaDIA (77.92%).
+
+Nestedness temperatures calculated using **all proteins and 83 runs** were lowest for MaxDIA (0.022) and Spectronaut (0.026), followed by AlphaDIA (1.150) and DIA-NN (1.448). These low values indicate highly nested protein detection patterns.
+
+Overall, protein aggregation substantially reduced missingness, allowing nearly all runs to be preserved in complete submatrices. Spectronaut and MaxDIA exhibited the most complete and strongly nested protein-level detection patterns, while AlphaDIA provided the largest absolute number of complete protein measurements. These findings reflect detection completeness rather than quantitative accuracy.
 
 
 ## Normalized precursor intensity density plots
