@@ -2689,7 +2689,7 @@ nimaa_precursor_summary_figure <- ggplot(
 print(nimaa_precursor_summary_figure)
 
 ggsave(
-  "NIMAA_precursor_summary_lollipop.png",
+  "figures/NIMAA_precursor_summary_lollipop.png",
   plot = nimaa_precursor_summary_figure,
   width = 12,
   height = 5.5,
@@ -2848,7 +2848,7 @@ nimaa_nestedness_figure <- ggplot() +
 print(nimaa_nestedness_figure)
 
 ggsave(
-  "NIMAA_precursor_nestedness.png",
+  "figures/NIMAA_precursor_nestedness.png",
   plot = nimaa_nestedness_figure,
   width = 10,
   height = 5.5,
@@ -3296,7 +3296,7 @@ nimaa_protein_figure <- (
 print(nimaa_protein_figure)
 
 ggsave(
-  "NIMAA_protein_element_max.png",
+  "figures/NIMAA_protein_element_max.png",
   nimaa_protein_figure,
   width = 14,
   height = 9,
@@ -3385,7 +3385,7 @@ nimaa_protein_summary_figure <- ggplot(
 print(nimaa_protein_summary_figure)
 
 ggsave(
-  "NIMAA_protein_summary_lollipop.png",
+  "figures/NIMAA_protein_summary_lollipop.png",
   plot = nimaa_protein_summary_figure,
   width = 11,
   height = 5.5,
