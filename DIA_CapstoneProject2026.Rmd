@@ -1,38 +1,117 @@
 ---
-title: "CapstoneProject2026"
+title: "Comparative Evaluation of Four DIA Proteomics Pipelines"
+subtitle: "Capstone Project 2026"
 author: "Mohieddin Jafari"
-date: "`r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
 output:
-  html_document: default
-  pdf_document: default
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    fig_caption: true
+    keep_tex: true
+    latex_engine: xelatex
+geometry: margin=0.85in
+fontsize: 10pt
 ---
-# Resources
-```{r setup, include=TRUE, echo=TRUE, eval=FALSE, message=FALSE}
-suppressPackageStartupMessages({
-library("QFeatures")  
-library("dplyr") 
-library("tidyr")
-library("ggplot2")
-library("msqrob2")    
-library("stringr")
-library("ExploreModelMatrix")
-library("MsCoreUtils") 
-library("matrixStats")
-library("patchwork")
-library("kableExtra")
-library("ComplexHeatmap")
-library("purrr")
-library("tibble")
-library("scater")
-library("arrow")
-library("ggcorrplot")
-})
+
+```{r setup, include=FALSE}
+# FALSE = knit report from existing cached results
+# TRUE  = allow computationally expensive analysis chunks
+run_analysis <- FALSE
+
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  out.width = "100%"
+)
+
+library(tidyverse)
+library(QFeatures)
+library(SummarizedExperiment)
+
+cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
+
+stopifnot(dir.exists(cache_dir))
 ```
+
+# Resources
+```{r session_information, echo=FALSE, message=FALSE, warning=FALSE}
+# ============================================================
+# Reproducibility: R environment and package versions
+# ============================================================
+
+packages <- c(
+  "QFeatures",
+  "dplyr",
+  "tidyr",
+  "ggplot2",
+  "msqrob2",
+  "stringr",
+  "ExploreModelMatrix",
+  "MsCoreUtils",
+  "matrixStats",
+  "patchwork",
+  "kableExtra",
+  "ComplexHeatmap",
+  "purrr",
+  "tibble",
+  "scater",
+  "arrow",
+  "ggcorrplot",
+  "readr",
+  "knitr",
+  "rmarkdown",
+  "bipartite"
+)
+
+package_info <- data.frame(
+  Package = packages,
+  Version = vapply(
+    packages,
+    function(pkg) {
+      if (requireNamespace(pkg, quietly = TRUE)) {
+        as.character(utils::packageVersion(pkg))
+      } else {
+        "NOT INSTALLED"
+      }
+    },
+    character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+cat("R version:", R.version.string, "\n")
+cat("Platform:", R.version$platform, "\n")
+cat("Operating system:", Sys.info()[["sysname"]], "\n")
+cat("Report generated:", format(Sys.time()), "\n\n")
+
+knitr::kable(
+  package_info,
+  caption = "R package versions used in the analysis",
+  row.names = FALSE,
+  format = "latex",
+  booktabs = TRUE,
+  longtable = TRUE
+)
+
+# Save complete session information to a text file
+# without printing the full output in the PDF.
+session_file <- "R_session_info.txt"
+
+writeLines(
+  capture.output(utils::sessionInfo()),
+  con = session_file
+)
+```
+
 
 # Data
 ## First time
-```{r import_and_cache_dia, message=FALSE, warning=FALSE}
-
+```{r import_and_cache_dia, message=FALSE, warning=FALSE, eval=run_analysis}
+library(tidyverse)
 # ============================================================
 # 1. File paths and cache directory
 # ============================================================
@@ -200,12 +279,12 @@ class(maxdia_raw$`Modified sequence`)
 ```
 
 ## Recovery
-```{r reload_cached_data}
+```{r reload_cached_data, eval=run_analysis}
 # ============================================================
 # Reload all four datasets after an R crash
 # ============================================================
 
-cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
+
 
 # Check that all required files exist
 cache_files <- c(
@@ -249,7 +328,7 @@ print(reload_summary)
 ```
 
 ## Inspect the imported datasets
-```{r inspect_datasets}
+```{r inspect_datasets, eval=FALSE}
 # Inspect object classes without creating a large data list
 data.frame(
   Software = c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA"),
@@ -287,7 +366,7 @@ head(maxdia_raw[, 1:8], 3)
 ```
 
 ## Hemogenize datasets
-```{r homogenize_datasets, message=FALSE, warning=FALSE}
+```{r homogenize_datasets, message=FALSE, warning=FALSE, eval=run_analysis}
 
 # ============================================================
 # 1. AlphaDIA: wide -> long
@@ -422,7 +501,7 @@ Each row in the precursor data table is in “long format” and contains inform
 
 ## Select relevant columns for each software
 Then, we filter the data to reduce the memory footprint. 
-```{r select_precursor_columns}
+```{r select_precursor_columns, eval=run_analysis}
 # ============================================================
 # 1. AlphaDIA
 # ============================================================
@@ -530,7 +609,7 @@ print(precursor_summary)
 
 The sample annotation table is not available and can be generated from the run labels, as the researchers included information on the design in the filenames.
 
-```{r sample_annotation}
+```{r sample_annotation, eval=run_analysis}
 # ============================================================
 # Generate sample annotations from run filenames
 # ============================================================
@@ -650,7 +729,7 @@ purrr::imap_dfr(
 ```
 ## Qfeatures
 Here, Precursor.Quantity provides the quantitative values, and Precursor.Id identifies the precursor features.
-```{r resolve_duplicate_precursors, message=FALSE}
+```{r resolve_duplicate_precursors, message=FALSE, eval=run_analysis}
 # ============================================================
 # Resolve duplicate precursor-run records before QFeatures
 # Only Spectronaut and MaxDIA
@@ -716,7 +795,7 @@ duplicate_validation <- purrr::imap_dfr(
 print(duplicate_validation, width = Inf)
 ```
 
-```{r create_qfeatures, message=FALSE}
+```{r create_qfeatures, message=FALSE, eval=run_analysis}
 # ============================================================
 # Create and cache deduplicated QFeatures objects
 # One QFeatures object per software
@@ -786,7 +865,7 @@ message("Deduplicated QFeatures cache creation finished.")
 ```
 
 ### 1. Recovery qfs
-```{r load_qfeatures, message=FALSE}
+```{r load_qfeatures, message=FALSE, eval=!run_analysis}
 # ============================================================
 # Recover cached deduplicated QFeatures objects
 # ============================================================
@@ -827,8 +906,33 @@ lapply(
 rm(qf_one)
 gc(verbose = FALSE)
 ```
+```{r recover_design_data, eval=!run_analysis, message=FALSE}
+# Recover experimental design from cached QFeatures metadata
+qf_alpha <- readRDS(qf_files[["AlphaDIA"]])
+cd <- as.data.frame(SummarizedExperiment::colData(qf_alpha))
 
-```{r inspect_qfeatures_all, message=FALSE}
+design_data <- data.frame(
+  Run = as.character(cd$runCol),
+  condition = as.character(cd$condition),
+  Batch = sub("_.*$", "", as.character(cd$runCol)),
+  stringsAsFactors = FALSE
+)
+
+# Validate recovered metadata
+stopifnot(
+  !anyNA(design_data$Run),
+  !anyNA(design_data$condition),
+  !anyNA(design_data$Batch),
+  !anyDuplicated(design_data$Run)
+)
+
+cat("Recovered experimental design:", nrow(design_data), "runs\n")
+print(head(design_data, 3))
+```
+
+
+
+```{r inspect_qfeatures_all, message=FALSE, eval=FALSE}
 # ============================================================
 # Initial inspection of unfiltered precursor-level QFeatures
 # ============================================================
@@ -879,7 +983,7 @@ run_summary <- dplyr::bind_rows(run_summary)
 print(qf_summary, width = Inf)
 ```
 
-```{r}
+```{r, eval=FALSE}
 (qf_alpha <- readRDS(qf_files[["AlphaDIA"]]))
 (qf_spectro <- readRDS(qf_files[["Spectronaut"]]))
 (qf_maxdia <- readRDS(qf_files[["MaxDIA"]]))
@@ -892,7 +996,7 @@ The data preprocessing workflow for DIA data is similar to the workflow for DDA-
 ## Missing values
 The first preprocessing step is to correctly encode the missing values. It is important that missing values are encoded using `NA`. For instance, non-observed values should not be encoded with a zero because true zeros (the proteomic feature is absent from the sample) cannot be distinguished from technical zeros (the feature was missed by the instrument or could not be identified). We therefore replace any zero in the quantitative data with an `NA`.
 
-```{r count_zero_intensities, message=FALSE}
+```{r count_zero_intensities, message=FALSE, eval=FALSE}
 # ============================================================
 # Count zero and missing precursor intensities before zeroIsNA
 # ============================================================
@@ -963,7 +1067,7 @@ qf_alpha <- zeroIsNA(qf_alpha, names(qf_alpha))
 ## Joining assay
 Combine 84 run-specific assays into one precursor assay for each DIA software:
 
-```{r combine_qfeatures_all, message=FALSE}
+```{r combine_qfeatures_all, message=FALSE, eval=run_analysis}
 # ============================================================
 # Combine 84 assays into one precursor-level assay per software
 # Validate assay, rowData and colData
@@ -1078,7 +1182,7 @@ message("All four combined QFeatures objects are ready.")
 ```
 ### 2. Recovery qfs
 
-```{r recover_combined_qfeatures, message=FALSE}
+```{r recover_combined_qfeatures, message=FALSE, eval=!run_analysis}
 # ============================================================
 # Locate saved combined QFeatures objects
 # Inspect one software at a time
@@ -1105,7 +1209,7 @@ if (!all(file.exists(combined_qf_files))) {
 ```
 
 
-```{r Inspect_combined_qfeatures, message=FALSE}
+```{r Inspect_combined_qfeatures, message=FALSE, eval=FALSE}
 # Inspect each software without keeping all objects in memory
 combined_summary <- list()
 
@@ -1148,7 +1252,7 @@ qf_diann <- readRDS(combined_qf_files[["DIANN"]])
 ```
 
 ## Filtering
-```{r filter_combined_precursors, message=FALSE}
+```{r filter_combined_precursors, message=FALSE, eval=run_analysis}
 # ============================================================
 # Filter combined precursor-level QFeatures
 #
@@ -1420,7 +1524,7 @@ filter_summary <- dplyr::bind_rows(filter_summary)
 print(tibble::as_tibble(filter_summary), width = Inf)
 ```
 Precursor-level filtering was performed independently for AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Precursors were retained if they had positive, non-missing intensities in at least two-thirds of the samples within any one experimental condition, preserving condition-specific signals. Annotated decoys, reverse hits, and potential contaminants were excluded. Proteotypic filtering was applied using DIA-NN's explicit annotation and a single-protein-identifier criterion for MaxDIA; however, proteotypic status could not be reliably verified for AlphaDIA and Spectronaut, so these precursors were retained pending further assessment. No minimum peptide count per protein was imposed. Following filtering, AlphaDIA retained 62.5%, DIA-NN 67.8%, Spectronaut 90.8%, and MaxDIA 63.6% of their initial precursors. Spectronaut's higher retention reflects its nearly complete quantitative matrix, whereas detection-frequency filtering had a greater impact on the other pipelines. Differences in software-specific quantification and proteotypic annotations should therefore be considered when interpreting precursor coverage.
-```{r visualize_precursor_filtering, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
+```{r visualize_precursor_filtering, eval=run_analysis, fig.width=9, fig.height=5, message=FALSE, warning=FALSE}
 # Prepare filtering results for visualization
 filter_plot_data <- filter_summary |>
   dplyr::select(Software, Retained, Removed) |>
@@ -1492,7 +1596,7 @@ ggplot2::ggplot(
 ```
 
 ## Log-transformation
-```{r log_transform_precursors, message=FALSE}
+```{r precursor_histograms_before_normalization, eval=FALSE, fig.width=12, fig.height=7}
 # ============================================================
 # Log2 transformation of filtered precursor intensities
 # Update existing filtered QFeatures files and R objects
@@ -1564,7 +1668,8 @@ plot(qf_maxdia)
 Following precursor-level filtering, intensity values were log2-transformed using the `logTransform()` function from the QFeatures package to reduce right-skewness and improve comparability of quantitative measurements. The transformed intensities were stored in a new assay named precursors_log, while the original filtered intensities were preserved in precursors. Both assays were retained within each software-specific QFeatures object (`qf_alpha`, `qf_diann`, `qf_spectro`, and `qf_maxdia`), maintaining their metadata and processing relationships for subsequent analysis.
 
 
-```{r precursor_histograms_before_normalization, fig.width=12, fig.height=7, message=FALSE, warning=FALSE}
+```{r precursor_density_before_normalization, eval=FALSE, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
+
 # ============================================================
 # Log2 precursor intensity distributions before normalization
 # 84 runs per software, displayed as overlaid histograms
@@ -1596,7 +1701,7 @@ for (software in names(qf_list)) {
     }
 
     data.frame(
-      Software = software,
+      Software = rep(software, length(values)),
       Run = colnames(se)[j],
       Log2_Intensity = values
     )
@@ -1642,7 +1747,8 @@ ggplot2::ggplot(
   )
 ```
 
-```{r precursor_density_before_normalization, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
+```{r precursor_density_before_normalization_extra, eval=FALSE, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
+
 # ============================================================
 # Pre-normalization log2 precursor intensity distributions
 # One density curve per software, pooling all 84 runs
@@ -1718,7 +1824,7 @@ rm(density_data)
 ```
 Unlike the other three software packages, Spectronaut has a distinctly multimodal intensity distribution, including a sharp peak near log2 intensity = 0 and a broader low-intensity population between approximately 2 and 7. This is particularly suspicious because almost every Spectronaut precursor has a reported intensity in all 84 runs, despite IsImputed = False throughout.
 ### Extra filtering step
-```{r spectronaut_intensity_floor_correction, message=FALSE}
+```{r spectronaut_intensity_floor_correction, message=FALSE, eval=run_analysis}
 # Replace Spectronaut raw intensity = 1 with NA
 # and reapply condition-aware precursor filtering
 
@@ -1807,7 +1913,7 @@ Run chunk 23 to re-visualize the distribution after extra filtering.
 ## Normalization
 Systematic technical variation between LC-MS runs can introduce differences in measured precursor intensities that are unrelated to biological conditions. Pre-normalization QC revealed batch-associated intensity shifts across the four DIA analysis pipelines. To account for run-level differences, the Median of Ratios method was applied independently to each software's log2-transformed precursor intensities. Normalization factors were calculated using `nfLogMedianOfRatios()` and subtracted from each corresponding run using `sweep()`. The normalized intensities were stored in a new assay named `precursors_norm`, preserving the original precursors and `precursors_log` assays.
 
-```{r normalize_precursors, message=FALSE}
+```{r normalize_precursors, message=FALSE, eval=run_analysis}
 # ============================================================
 # Median of Ratios normalization for four DIA software tools
 # ============================================================
@@ -1901,7 +2007,8 @@ plot(qf_spectro)
 plot(qf_maxdia)
 ```
 
-```{r evaluate_precursor_normalization, fig.width=14, fig.height=10, message=FALSE, warning=FALSE}
+```{r evaluate_precursor_normalization, eval=FALSE, fig.width=14, fig.height=10, message=FALSE, warning=FALSE}
+
 # ============================================================
 # Evaluate Median of Ratios normalization
 # Four DIA software packages, 84 runs each
@@ -2142,7 +2249,7 @@ print(normalization_qc_summary)
 rm(density_list, median_list, density_qc)
 gc(verbose = FALSE)
 ```
-```{r}
+```{r, eval=FALSE}
 set.seed(123)
 
 target_run <- "Group1_c-jun_KO_1"
@@ -2227,7 +2334,7 @@ ggplot2::ggplot(
 ### Removing outlier run
 One LC-MS run (Group1_c-jun_KO_1) exhibited an atypical precursor intensity distribution across multiple DIA analysis pipelines, most prominently in AlphaDIA and DIA-NN. Given the consistency of this observation across software tools and the availability of additional replicates for the corresponding condition, the run was excluded from downstream quantitative analysis. Normalization was subsequently recalculated using the remaining 83 runs.
 
-```{r exclude_outlier_and_renormalize, message=FALSE}
+```{r exclude_outlier_and_renormalize, message=FALSE, eval=run_analysis}
 # ============================================================
 # Exclude shared QC outlier and repeat normalization
 # ============================================================
@@ -2363,6 +2470,41 @@ The results strengthen the justification for excluding Group1_c-jun_KO_1, partic
 
 Precursor detection was represented as a binary precursor-by-run matrix (observed = 1; missing = 0). The NIMAA-style `Rectangular_element_max` method was applied to all precursor features to identify a fully observed rectangular submatrix. The efficient implementation was checked against the original NIMAA output on a 5,000-precursor test matrix.
 
+```{r recover_nimaa_inputs, eval=!run_analysis, message=FALSE}
+# Recover fully processed QFeatures from saved RDS files
+
+qf_alpha <- readRDS(
+  file.path(cache_dir, "qf_AlphaDIA_filtered_final_pr.rds")
+)
+
+qf_diann <- readRDS(
+  file.path(cache_dir, "qf_DIANN_filtered_final_pr.rds")
+)
+
+qf_spectro <- readRDS(
+  file.path(cache_dir, "qf_Spectronaut_filtered_final_pr.rds")
+)
+
+qf_maxdia <- readRDS(
+  file.path(cache_dir, "qf_MaxDIA_filtered_final_pr.rds")
+)
+
+qf_nimaa <- list(
+  AlphaDIA = qf_alpha,
+  `DIA-NN` = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
+)
+
+stopifnot(all(vapply(
+  qf_nimaa,
+  function(qf) "precursors_norm" %in% names(qf),
+  logical(1)
+)))
+
+cat("Successfully recovered normalized QFeatures for all four pipelines.\n")
+```
+
 ```{r nimaa-precursor-incidence}
 # Binary precursor-by-run incidence matrices:
 # 1 = observed finite abundance; 0 = missing
@@ -2449,7 +2591,7 @@ find_nimaa_rectangle <- function(x) {
 }
 ```
 
-```{r nimaa-full-element-max}
+```{r nimaa-full-element-max, eval=run_analysis}
 nimaa_full_arranged <- lapply(nimaa_incidence, arrange_nimaa_matrix)
 
 nimaa_full_rectangles <- dplyr::bind_rows(
@@ -2475,7 +2617,7 @@ stopifnot(all(vapply(names(nimaa_full_arranged), function(s) {
 print(nimaa_full_rectangles, row.names = FALSE)
 ```
 
-```{r nimaa-element-max-figure-fixed, fig.width=14, fig.height=9, dpi=200}
+```{r nimaa-element-max-figure-fixed, eval=FALSE, fig.width=14, fig.height=9, dpi=200}
 library(ggplot2)
 library(patchwork)
 dir.create("figures", showWarnings = FALSE)
@@ -2620,7 +2762,7 @@ ggplot2::ggsave(
 )
 ```
 
-```{r nimaa-precursor-summary-lollipop, fig.width=12, fig.height=5.5, dpi=300}
+```{r nimaa-precursor-summary-lollipop, eval=FALSE, fig.width=12, fig.height=5.5, dpi=300}
 library(dplyr)
 library(ggplot2)
 library(scales)
@@ -2698,7 +2840,7 @@ ggsave(
 )
 ```
 
-```{r nimaa-nestedness-repeated}
+```{r nimaa-nestedness-repeated, eval=run_analysis, eval=FALSE}
 library(dplyr)
 library(ggplot2)
 
@@ -2760,7 +2902,8 @@ nimaa_nestedness_summary <- nimaa_nestedness_repeated |>
 
 print(as.data.frame(nimaa_nestedness_summary), row.names = FALSE)
 ```
-```{r nimaa-nestedness-boxplot, fig.width=10, fig.height=6, dpi=300}
+
+```{r nimaa-nestedness-boxplot, eval=FALSE, fig.width=10, fig.height=6, dpi=300}
 library(ggplot2)
 library(dplyr)
 
@@ -2864,7 +3007,7 @@ Repeated sampling (20 iterations of 5,000 precursors) showed consistent differen
 ## Aggregation
 The objective of aggregation is to summarise the precursor-level intensities into a protein expression value. The fact that different precursors have different intensities (2.), may be inconsistently identified (3.) and/or quantified (4.), and show sample correlations (5.) can lead to bias if we use simple summarisation approaches such as summing or averaging the precursor intensities for each sample. Instead, we will resort to more advanced summarisation approaches to accommodate for these issues. Here, we summarise the precursor-level data into protein intensities usin`g maxLFQ`. It is implemented in the `maxLFQ` function of the `iq` package.
 
-```{r protein_aggregation_maxlfq, message=FALSE}
+```{r protein_aggregation_maxlfq, message=FALSE, eval=run_analysis}
 # ============================================================
 # Protein-level aggregation using MaxLFQ
 # Four DIA software packages, 83 runs each
@@ -2958,7 +3101,7 @@ lapply(
 ```
 
 ### 3. Recovery qfs
-```{r recover_protein_qfeatures, message=FALSE}
+```{r recover_protein_qfeatures, message=FALSE, eval=!run_analysis}
 # ============================================================
 # Recover saved protein-level QFeatures objects
 # ============================================================
@@ -3024,7 +3167,7 @@ if (!all(recovery_summary$Protein_Assay)) {
 ```
 
 The tutorial uses longForm() to visualize every measurement. Because your datasets are large, this version samples up to 2,000 quantified proteins per run for plotting, while retaining all protein measurements in the QFeatures objects.
-```{r protein_aggregation_density, fig.width=14, fig.height=9, message=FALSE, warning=FALSE}
+```{r protein_aggregation_density, eval=FALSE, fig.width=14, fig.height=9, message=FALSE, warning=FALSE}
 # ============================================================
 # Protein-level intensity density plots
 # Four DIA software packages
@@ -3167,7 +3310,7 @@ nimaa_protein_check <- bind_rows(
 
 print(as.data.frame(nimaa_protein_check), row.names = FALSE)
 ```
-```{r nimaa-protein-rectangles}
+```{r nimaa-protein-rectangles, eval=run_analysis}
 # Apply the same NIMAA arrangement and element-max rectangle method
 # to the full protein-level incidence matrices.
 
@@ -3212,7 +3355,8 @@ print(
   row.names = FALSE
 )
 ```
-```{r nimaa-protein-incidence-figure, fig.width=14, fig.height=9, dpi=300}
+
+```{r nimaa-protein-incidence-figure, eval=FALSE, fig.width=14, fig.height=9, dpi=300}
 library(ggplot2)
 library(patchwork)
 
@@ -3305,7 +3449,7 @@ ggsave(
 )
 ```
 
-```{r nimaa-protein-summary-lollipop, fig.width=11, fig.height=5.5, dpi=300}
+```{r nimaa-protein-summary-lollipop, eval= FALSE, fig.width=11, fig.height=5.5, dpi=300}
 library(dplyr)
 library(ggplot2)
 library(scales)
@@ -3394,7 +3538,7 @@ ggsave(
 )
 ```
 
-```{r nimaa-protein-nestedness}
+```{r nimaa-protein-nestedness, eval=run_analysis}
 # Full protein-level nestedness temperature
 # All proteins and all 83 runs
 
@@ -5447,7 +5591,7 @@ print(model_design_summary, row.names = FALSE)
 ```
 
 ### Fit the first protein-level model
-```{r fit_msqrob_alphadia, message=FALSE, warning=FALSE}
+```{r fit_msqrob_alphadia, message=FALSE, warning=FALSE, eval=run_analysis}
 # ============================================================
 # Robust batch-adjusted protein-level modeling: AlphaDIA
 # ============================================================
@@ -5479,7 +5623,7 @@ cat("Missing model entries:",
 # Inspect first three model objects
 models_alpha[1:3]
 ```
-```{r fit_msqrob_remaining, message=FALSE, warning=FALSE}
+```{r fit_msqrob_remaining, message=FALSE, warning=FALSE, eval=run_analysis}
 # ============================================================
 # Robust batch-adjusted protein-level modeling
 # DIA-NN, Spectronaut, and MaxDIA
@@ -5539,7 +5683,7 @@ model_fit_summary <- dplyr::bind_rows(
 print(model_fit_summary, row.names = FALSE)
 ```
 
-```{r qc_msqrob_model_quality, message=FALSE, warning=FALSE}
+```{r qc_msqrob_model_quality, eval=FALSE, message=FALSE, warning=FALSE}
 # ============================================================
 # Model-quality diagnostics across all four DIA pipelines
 # ============================================================
@@ -5655,7 +5799,7 @@ print(model_quality_summary, row.names = FALSE)
 ```
 These results are encouraging. All four DIA pipelines have successfully produced robust models for the overwhelming majority of proteins, but a small subset requires caution before differential abundance testing. The median residual degrees of freedom are approximately 66 across all four pipelines, suggesting that most models retain substantial information after accounting for batch and condition.
 
-```{r}
+```{r, eval=FALSE}
 colnames(
   model.matrix(
     model,
@@ -5745,7 +5889,7 @@ cat("Contrast matrix dimensions:", dim(L), "\n")
 print(L)
 ```
 
-```{r hypothesis_test_alphadia, message=FALSE, warning=FALSE}
+```{r hypothesis_test_alphadia, eval= FALSE, message=FALSE, warning=FALSE}
 # ============================================================
 # Hypothesis testing: AlphaDIA
 # 11 planned biological contrasts
@@ -5784,7 +5928,7 @@ stopifnot(all(colnames(L) %in% result_columns))
 cat("AlphaDIA: 11 planned contrasts available.\n")
 ```
 
-```{r collect_alphadia_results, message=FALSE, warning=FALSE}
+```{r collect_alphadia_results, eval= FALSE, message=FALSE, warning=FALSE}
 # ============================================================
 # Collect AlphaDIA differential abundance results
 # ============================================================
@@ -5804,7 +5948,7 @@ print(colnames(inference_alpha))
 cat("\nFirst three rows:\n")
 print(utils::head(inference_alpha, 3))
 ```
-```{r summarize_alphadia_da, message=FALSE, warning=FALSE}
+```{r summarize_alphadia_da, eval=FALSE, message=FALSE, warning=FALSE}
 # ============================================================
 # AlphaDIA differential abundance summary
 # ============================================================
@@ -5849,7 +5993,7 @@ Three patterns stand out:
 3. The JNK inhibitor effect is much more extensive at 24h than 6h (3,670 versus 236 significant proteins). This is an interesting time-dependent pattern worth investigating through effect sizes and pathway enrichment.
 
 
-```{r hypothesis_test_remaining, message=FALSE, warning=FALSE}
+```{r hypothesis_test_remaining, eval=FALSE, message=FALSE, warning=FALSE}
 # ============================================================
 # Hypothesis testing for remaining DIA pipelines
 # ============================================================
@@ -6255,7 +6399,7 @@ get_protein_coverage <- function(qf, software) {
   precursor_mapping <- unique(precursor_mapping)
 
   coverage <- precursor_mapping %>%
-    count(Protein.Group, name = "Precursor_Count")
+    dplyr::count(Protein.Group, name = "Precursor_Count")
 
   coverage$Software <- software
 
@@ -6329,7 +6473,7 @@ print(p_precursor_coverage)
 To investigate the discrepancy between MaxDIA's high precursor-level coverage and its comparatively lower protein-group identification count, the number of distinct peptide sequence–charge combinations assigned to each protein group was examined. MaxDIA exhibited the highest mean (27.1) and median (20) sequence–charge combinations per protein group, compared with Spectronaut (19.9 and 13), DIA-NN (19.2 and 12), and AlphaDIA (16.0 and 10), respectively. Furthermore, 99.1% of MaxDIA-specific sequence–charge combinations were associated with protein accessions also identified by at least one other pipeline. Together, these findings indicate that MaxDIA's increased precursor-level identification coverage predominantly reflects greater sequence–charge representation of already identified proteins rather than a proportional expansion of protein-group coverage. Nevertheless, differences in precursor reporting, protein inference, and filtering may also contribute to the observed variation.
 
 ### Differential abundance comparison 
-```{r da_summary_all_pipelines, message=FALSE, warning=FALSE}
+```{r da_summary_all_pipelines, message=FALSE, warning=FALSE, eval=FALSE}
 # ============================================================
 # Differential abundance summary: 4 pipelines x 11 contrasts
 # Uses existing msqrob2 fits; no model refitting
@@ -6406,7 +6550,7 @@ print(
 )
 ```
 
-```{r da_significant_heatmap, fig.width=13, fig.height=8, dpi=300, out.width="100%", message=FALSE, warning=FALSE}
+```{r da_significant_heatmap, fig.width=13, fig.height=8, dpi=300, out.width="100%", message=FALSE, warning=FALSE, eval=FALSE}
 
 library(ggplot2)
 
@@ -6497,7 +6641,7 @@ print(p_da_heatmap)
 ```
 Differential abundance analysis revealed substantial variation in the number of significant protein groups across the four DIA pipelines and 11 experimental contrasts. AlphaDIA and DIA-NN generally reported the largest numbers of differentially abundant proteins, whereas MaxDIA consistently reported the fewest despite exhibiting the greatest sequence–charge identification coverage. For example, in the KO versus CTRL comparison following 6 hours of cisplatin treatment, DIA-NN identified 4,021 significant proteins, compared with 3,747 for AlphaDIA, 2,709 for Spectronaut, and 647 for MaxDIA. A particularly consistent pattern was observed for the JNK inhibitor contrasts, with all four pipelines identifying substantially more significant proteins at 24 hours than at 6 hours. These findings demonstrate that increased precursor-level coverage does not necessarily correspond to increased differential abundance detection. Differences in quantitative variability, protein inference, missingness, and statistical power may contribute to the observed discrepancies.
 
-```{r da_upset_cisplatin_6h, fig.width=13, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE}
+```{r da_upset_cisplatin_6h, fig.width=13, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE, eval=FALSE}
 
 # ============================================================
 # Differential abundance UpSet: KO vs CTRL cisplatin 6h
@@ -6613,7 +6757,7 @@ print(p_da_upset_6h)
 ```
 Differential abundance overlap analysis for the KO versus CTRL comparison following 6 hours of cisplatin treatment revealed substantial agreement among the DIA pipelines, alongside differences in the number of significant protein groups. A total of 557 protein groups were classified as differentially abundant by all four pipelines, while 1,210 additional groups were shared by AlphaDIA, DIA-NN, and Spectronaut but not MaxDIA. Notably, 86.1% of MaxDIA's 647 significant protein groups were also significant in all three other pipelines, indicating that its smaller differential abundance set largely represented a shared subset of findings. In contrast, AlphaDIA and DIA-NN contributed considerably larger numbers of pipeline-specific significant protein groups. These results demonstrate substantial cross-pipeline agreement for a common set of differential abundance findings, while highlighting differences in the breadth of statistically significant protein detection.
 
-```{r da_upset_all_contrasts, fig.width=13, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE, results='hide'}
+```{r da_upset_all_contrasts, fig.width=13, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE, results='hide', eval=FALSE}
 
 library(ComplexUpset)
 library(ggplot2)
@@ -6734,7 +6878,7 @@ for (contrast_name in contrast_order) {
   }
 }
 ```
-```{r save_da_upset_plots, message=FALSE, warning=FALSE}
+```{r save_da_upset_plots, message=FALSE, warning=FALSE, eval=FALSE}
 dir.create("figures/DA_UpSet", recursive = TRUE, showWarnings = FALSE)
 
 for (i in seq_along(contrast_order)) {
@@ -6760,7 +6904,7 @@ Differential abundance overlap analysis across 11 experimental contrasts reveale
 
 ### Pairwise log2 fold-change comparison
 
-```{r da_logfc_agreement_6h, fig.width=12, fig.height=10, dpi=300, out.width="100%", message=FALSE, warning=FALSE}
+```{r da_logfc_agreement_6h, fig.width=12, fig.height=10, dpi=300, out.width="100%", message=FALSE, warning=FALSE, eval=FALSE}
 
 library(dplyr)
 library(tidyr)
@@ -6933,7 +7077,7 @@ print(p_logfc_agreement_6h)
 ```
 Pairwise comparison of protein-level log2 fold changes for the KO versus CTRL contrast following 6 hours of cisplatin treatment revealed positive quantitative agreement across all four DIA analysis pipelines, although the strength of agreement varied. AlphaDIA and DIA-NN exhibited the strongest concordance (Pearson r = 0.845; Spearman ρ = 0.815), with 83.0% of shared protein groups showing consistent fold-change directions. Comparisons involving Spectronaut demonstrated intermediate agreement (Pearson r = 0.755–0.787), whereas MaxDIA exhibited weaker correlations with the other pipelines (Pearson r = 0.613–0.653) and lower directional concordance (72.4–72.9%). These findings indicate that differences in differential abundance detection are accompanied by variation in estimated protein abundance changes, particularly for MaxDIA. Although MaxDIA showed the highest precursor sequence–charge coverage per protein group, this did not translate into greater differential abundance detection or stronger quantitative agreement. Further assessment of fold-change magnitude and statistical uncertainty is needed to clarify the factors contributing to these differences.
 
-```{r da_abs_logfc_distribution_6h, fig.width=12, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE}
+```{r da_abs_logfc_distribution_6h, fig.width=12, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE, eval=FALSE}
 
 library(dplyr)
 library(tidyr)
@@ -7055,7 +7199,7 @@ These results are important because they challenge our earlier hypothesis that M
 
 Comparison of absolute protein-level log2 fold-change distributions for the KO versus CTRL cisplatin 6h contrast showed that MaxDIA's lower number of significant protein groups was not accompanied by uniformly smaller estimated abundance changes. Among 7,474 protein groups with finite fold-change estimates in all four pipelines, the median absolute log2 fold change was 0.156 for AlphaDIA, 0.184 for DIA-NN, 0.215 for Spectronaut, and 0.181 for MaxDIA. Spectronaut exhibited the largest overall effect-size distribution, whereas MaxDIA showed magnitudes broadly comparable to DIA-NN and greater than AlphaDIA. These results do not support systematic attenuation of fold-change magnitudes as the principal explanation for MaxDIA's reduced differential abundance detection. Together with its weaker cross-pipeline fold-change correlations and higher median model residual variability, the findings suggest that differences in quantitative precision and statistical uncertainty may contribute to the observed discrepancies. Direct comparison of contrast-specific standard errors is required to evaluate this explanation.
 
-```{r da_statistical_precision_6h, fig.width=12, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE}
+```{r da_statistical_precision_6h, fig.width=12, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE, eval=FALSE}
 
 library(dplyr)
 library(tidyr)
@@ -7214,7 +7358,7 @@ print(p_precision)
 Despite comparable median absolute log2 fold changes between MaxDIA and DIA-NN (0.181 versus 0.184) among 7,474 commonly quantified protein groups, MaxDIA exhibited substantially higher contrast-specific standard errors (median 0.182 versus 0.085) and lower absolute t-statistics (median 0.951 versus 2.19). These findings suggest that reduced statistical precision, rather than systematically smaller estimated abundance changes, is a major contributor to MaxDIA's lower differential abundance detection rate. The results also demonstrate that greater precursor coverage per protein group does not necessarily translate into greater sensitivity for detecting differential protein abundance.
 
 
-```{r residual-variability-comparison, fig.width=11, fig.height=6, dpi=300, out.width="100%"}
+```{r residual-variability-comparison, eval=FALSE, message=FALSE, warning=FALSE, fig.width=11, fig.height=6, dpi=300, out.width="100%"}
 library(dplyr)
 library(ggplot2)
 
@@ -7344,7 +7488,7 @@ print(p_sigma)
 ```
 MaxDIA has substantially greater protein-level residual variability than the other three pipelines, even when we compare exactly the same 7,474 protein groups. On 7,474 matched protein groups, MaxDIA exhibited the highest residual variability (median σ = 0.309), approximately 2.22-fold greater than DIA-NN (0.139). This difference was accompanied by a 2.14-fold higher median standard error for the KO versus CTRL cisplatin 6h contrast, despite comparable median absolute log2 fold changes. These findings suggest that increased residual variability, rather than uniformly smaller estimated biological effects, contributes substantially to MaxDIA's lower number of statistically significant differentially abundant proteins. MaxDIA's lower differential abundance sensitivity is associated with substantially greater residual variability and higher statistical uncertainty, despite its greater precursor coverage per protein.
 
-```{r precision-all-contrasts, fig.width=13, fig.height=9, dpi=300, out.width="100%"}
+```{r precision-all-contrasts, fig.width=13, fig.height=9, dpi=300, out.width="100%", eval=FALSE}
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -7458,7 +7602,7 @@ print(p_precision_all)
 
 Across all 11 differential abundance contrasts, MaxDIA consistently exhibited the highest median standard errors and lowest median absolute t-statistics among the four DIA analysis pipelines. This pattern persisted when restricting each contrast to approximately 7,475 protein groups with valid estimates in all four pipelines. MaxDIA did not systematically produce smaller effect sizes; in seven contrasts, it exhibited the largest median absolute log2 fold change. Combined with its substantially higher protein-level residual variability, these findings indicate that increased statistical uncertainty is a major contributor to MaxDIA's lower differential abundance detection rate.
 
-```{r da_logfc_agreement_all, fig.width=12, fig.height=8, dpi=300, out.width="100%", results="asis"}
+```{r da_logfc_agreement_all, fig.width=12, fig.height=8, dpi=300, out.width="100%", results="asis", eval=FALSE}
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -7594,7 +7738,7 @@ cat("\n\n### Pairwise fold-change agreement summary\n\n")
 
 print(logfc_agreement_summary, n = Inf)
 ```
-```{r save_da_logfc_agreement_all}
+```{r save_da_logfc_agreement_all, eval=FALSE}
 # Output directory
 output_dir <- "figures/da_logfc_agreement"
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -7638,7 +7782,7 @@ cat(
 Pairwise comparison of protein-level log2 fold changes across 11 differential abundance contrasts revealed substantial differences in agreement among DIA analysis pipelines. AlphaDIA and DIA-NN showed the strongest overall concordance, with a median Pearson correlation of 0.719 and median directional agreement of 77.5%. DIA-NN and Spectronaut also exhibited relatively strong agreement (median r = 0.671). In contrast, comparisons involving MaxDIA consistently showed lower correlations, ranging from median r = 0.378 to 0.500, and lower directional agreement, ranging from 63.9% to 68.0%. Agreement was contrast-dependent, with stronger concordance for prominent treatment-associated responses and weaker concordance for the JNK inhibitor effect at 6h. Combined with MaxDIA's higher residual variability and standard errors, these findings suggest that pipeline-specific differences in protein quantification and statistical precision contribute to variability in differential abundance results. Nevertheless, cross-pipeline agreement alone cannot establish which pipeline provides the most accurate estimates.
 
 
-```{r da_volcano_all, fig.width=13, fig.height=9, dpi=300, out.width="100%"}
+```{r da_volcano_all, fig.width=13, fig.height=9, dpi=300, out.width="100%", eval=FALSE}
 library(dplyr)
 library(ggplot2)
 
@@ -7965,7 +8109,7 @@ p_temporal_design <- ggplot(
 print(p_temporal_design)
 ```
 
-```{r temporal-joint-contrasts}
+```{r temporal-joint-contrasts, eval=FALSE}
 # Reuse the existing coefficient-by-contrast matrix L
 # Rows: model coefficients; columns: contrasts
 
@@ -8023,7 +8167,7 @@ stopifnot(
 print(L_temporal_interaction)
 ```
 
-```{r temporal-joint-tests}
+```{r temporal-joint-tests, eval=FALSE}
 library(dplyr)
 
 # Existing fitted protein models
@@ -8173,7 +8317,7 @@ Its lower discovery counts are consistent with your earlier finding of substanti
 The 6h and 24h cisplatin samples occupy different batches. The fitted additive batch model adjusts for this, but interpretation relies on its assumptions. These are cisplatin-response comparisons across experimental conditions, not repeated measurements of the same samples over time.
 
 
-```{r temporal-interaction-agreement}
+```{r temporal-interaction-agreement, eval=FALSE}
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -8279,7 +8423,7 @@ That suggests MaxDIA's smaller discovery set is largely a high-confidence subset
 One caveat: these 243 proteins agree in statistical significance, not necessarily in the direction of their 6h and 24h interaction effects.
 
 
-```{r temporal-interaction-effect-agreement}
+```{r temporal-interaction-effect-agreement, eval=FALSE}
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -8434,7 +8578,8 @@ p_interaction_effects <- interaction_effects |>
 
 print(p_interaction_effects)
 ```
-```{r temporal-interaction-time-specific}
+
+```{r temporal-interaction-time-specific, eval=FALSE}
 # Test each interaction contrast using the existing fitted models
 # Test and collect the two individual interaction contrasts
 interaction_time_results <- lapply(names(qf_models), function(software) {
@@ -8681,7 +8826,7 @@ Within-condition quantitative variability was evaluated using the standard devia
 
 ### Dynamic range and abundance-dependent precision
 
-```{r abundance-dependent-precision}
+```{r abundance-dependent-precision, eval=FALSE}
 # Restrict to proteins shared by all four pipelines
 shared_proteins_precision <- Reduce(
   intersect,
@@ -8791,26 +8936,6 @@ print(p_abundance_precision)
 Abundance-dependent precision was evaluated across 7,483 proteins shared by all four DIA pipelines by examining fitted residual standard deviations across ten within-pipeline protein abundance deciles. All pipelines generally exhibited decreasing residual variability with increasing protein abundance, although the magnitude of this relationship differed considerably. AlphaDIA and DIA-NN demonstrated consistently low residual SDs across most abundance deciles, decreasing from 0.218 and 0.226 in the lowest decile to 0.138 and 0.120 in the highest decile, respectively. MaxDIA exhibited substantially higher residual variability throughout the abundance range, with median SDs decreasing from 0.435 to 0.296, indicating that its reduced quantitative precision was not restricted to low-abundance proteins. Spectronaut displayed the strongest abundance dependence, with residual SD decreasing from 0.628 in the lowest decile to 0.147 in the highest decile, representing a 4.27-fold difference. Although Spectronaut showed particularly high variability among low-abundance proteins, its precision approached that of AlphaDIA and DIA-NN at higher abundance levels. Overall, these findings indicate that DIA-NN and AlphaDIA maintained comparatively stable quantitative precision across the abundance range, whereas MaxDIA exhibited consistently elevated residual variability and Spectronaut was particularly affected at low abundance.
 
 The pronounced abundance-dependent variability observed for Spectronaut is consistent with the unusual low-intensity distribution identified during initial data quality assessment, when intensity values of exactly 1 were detected and subsequently treated as missing values. Despite this preprocessing correction, Spectronaut retained substantially elevated residual variability among low-abundance proteins, whereas its precision approached that of AlphaDIA and DIA-NN at higher abundance levels. This suggests that low-abundance quantification represents a particular limitation in the processed Spectronaut dataset, although the present analysis cannot establish whether the original intensity-value artifact directly contributed to the remaining variability.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
