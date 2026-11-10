@@ -2617,25 +2617,70 @@ stopifnot(all(vapply(names(nimaa_full_arranged), function(s) {
 print(nimaa_full_rectangles, row.names = FALSE)
 ```
 
-```{r nimaa-element-max-figure-fixed, eval=FALSE, fig.width=14, fig.height=9, dpi=200}
+```{r nimaa-precursor-figure, eval=FALSE, fig.width=14, fig.height=9, dpi=300, message=FALSE}
 library(ggplot2)
 library(patchwork)
-dir.create("figures", showWarnings = FALSE)
+library(dplyr)
 
-# Consistent pipeline colors used throughout the capstone
 software_colors <- c(
-  "AlphaDIA"   = "#0072B2",
-  "DIA-NN"     = "#E69F00",
+  "AlphaDIA"    = "#0072B2",
+  "DIA-NN"      = "#E69F00",
   "Spectronaut" = "#009E73",
-  "MaxDIA"     = "#CC79A7"
+  "MaxDIA"      = "#CC79A7"
 )
 
-plot_nimaa_element_max <- function(software) {
+software_order <- names(software_colors)
 
-  # Full arranged precursor incidence matrix
+# ============================================================
+# PRECURSOR-ONLY MEMORY-EFFICIENT RASTER
+# ============================================================
+
+make_precursor_raster <- function(x, color, max_columns = 2200L) {
+
+  n_features <- nrow(x)
+  n_runs <- ncol(x)
+  n_display <- min(n_features, max_columns)
+
+  boundaries <- floor(seq(
+    0, n_features,
+    length.out = n_display + 1L
+  ))
+
+  display_matrix <- matrix(
+    0L, nrow = n_runs, ncol = n_display
+  )
+
+  for (j in seq_len(n_display)) {
+    first <- boundaries[j] + 1L
+    last <- boundaries[j + 1L]
+
+    fraction <- colMeans(
+      x[first:last, , drop = FALSE] == 1L,
+      na.rm = TRUE
+    )
+
+    display_matrix[, j] <- as.integer(fraction >= 0.5)
+  }
+
+  display_matrix <- display_matrix[
+    n_runs:1, , drop = FALSE
+  ]
+
+  as.raster(matrix(
+    c("#FFFFFF", color)[as.vector(display_matrix) + 1L],
+    nrow = nrow(display_matrix),
+    ncol = ncol(display_matrix)
+  ))
+}
+
+# ============================================================
+# PRECURSOR PLOT FUNCTION
+# ============================================================
+
+plot_nimaa_precursor <- function(software) {
+
   x <- nimaa_full_arranged[[software]]
 
-  # NIMAA element-max rectangle
   rect <- nimaa_full_rectangles |>
     dplyr::filter(
       Software == software,
@@ -2644,61 +2689,48 @@ plot_nimaa_element_max <- function(software) {
 
   stopifnot(nrow(rect) == 1L)
 
-  # Raster:
-  # Observed = pipeline-specific color
-  # Missing  = white
-  # Reverse row order to align with the reversed y-axis
-  raster_image <- as.raster(
-    ifelse(
-      t(x)[ncol(x):1, , drop = FALSE] == 1L,
-      software_colors[[software]],
-      "#FFFFFF"
-    )
+  n_features <- nrow(x)
+  n_runs <- ncol(x)
+
+  raster_image <- make_precursor_raster(
+    x,
+    software_colors[[software]]
   )
 
   ggplot() +
-
-    # Full precursor-by-run incidence matrix
     annotation_raster(
       raster_image,
       xmin = 0.5,
-      xmax = nrow(x) + 0.5,
+      xmax = n_features + 0.5,
       ymin = 0.5,
-      ymax = ncol(x) + 0.5
+      ymax = n_runs + 0.5
     ) +
-
-    # Highlight complete element-max rectangle
-          annotate(
+    annotate(
       "rect",
       xmin = 0.5,
       xmax = rect$Precursors + 0.5,
-      ymin = ncol(x) - rect$Runs + 0.5,
-      ymax = ncol(x) + 0.5,
+      ymin = n_runs - rect$Runs + 0.5,
+      ymax = n_runs + 0.5,
       fill = "#666666",
       alpha = 0.22,
       colour = "#333333",
       linewidth = 0.7
     ) +
-
-    # Full precursor range (prevents cropping)
     scale_x_continuous(
-      limits = c(0.5, nrow(x) + 0.5),
-      labels = scales::label_number(big.mark = ","),
+      limits = c(0.5, n_features + 0.5),
+      breaks = scales::breaks_pretty(n = 3),
+      labels = scales::label_comma(),
       expand = c(0, 0)
     ) +
-
-    # First arranged run appears at the top
     scale_y_reverse(
-      limits = c(ncol(x) + 0.5, 0.5),
+      limits = c(n_runs + 0.5, 0.5),
       breaks = c(1, 20, 40, 60, 83),
       expand = c(0, 0)
     ) +
-
     labs(
       title = software,
       subtitle = paste0(
-        "Element-max: ",
-        format(rect$Precursors, big.mark = ","),
+        scales::comma(rect$Precursors),
         " precursors × ",
         rect$Runs,
         " runs"
@@ -2706,61 +2738,52 @@ plot_nimaa_element_max <- function(software) {
       x = "Arranged precursors",
       y = "Arranged runs"
     ) +
-
-    theme_classic(base_size = 10) +
-
+    theme_classic(base_size = 18) +
     theme(
       plot.title = element_text(
-        face = "bold",
-        size = 13
+        face = "bold", size = 23,
+        margin = margin(b = 3)
       ),
       plot.subtitle = element_text(
-        size = 10
+        size = 17,
+        margin = margin(b = 6)
       ),
       axis.title = element_text(
-        size = 10
+        size = 18, face = "bold"
       ),
-      axis.text = element_text(
-        size = 9
+      axis.text.y = element_text(size = 16),
+      axis.text.x = element_text(
+        size = 16,
+        angle = 45,
+        hjust = 1,
+        vjust = 1
       ),
+      axis.ticks = element_line(linewidth = 0.5),
       panel.border = element_rect(
         colour = "grey50",
         fill = NA,
-        linewidth = 0.3
+        linewidth = 0.4
       ),
-      plot.margin = margin(8, 8, 8, 8)
+      plot.margin = margin(5, 8, 5, 5)
     )
 }
 
-# Four-panel comparison
-nimaa_element_max_figure <- (
-  plot_nimaa_element_max("AlphaDIA") |
-  plot_nimaa_element_max("DIA-NN")
-) / (
-  plot_nimaa_element_max("Spectronaut") |
-  plot_nimaa_element_max("MaxDIA")
-) +
-  patchwork::plot_annotation(
-    title = "NIMAA: Maximum complete precursor submatrices",
-    subtitle = paste0(
-      "Rectangular_element_max | ",
-      "83 runs per pipeline"
-    )
-  )
+# ============================================================
+# FOUR PRECURSOR PANELS
+# ============================================================
 
-# Display figure
-print(nimaa_element_max_figure)
-
-# Save publication-quality PNG
-ggplot2::ggsave(
-  filename = "figures/NIMAA_element_max_comparison.png",
-  plot = nimaa_element_max_figure,
-  width = 14,
-  height = 9,
-  dpi = 300,
-  bg = "white"
+# PRECURSOR NIMAA: 1 row × 4 columns
+nimaa_precursor_figure <- patchwork::wrap_plots(
+  plot_nimaa_precursor("AlphaDIA"),
+  plot_nimaa_precursor("DIA-NN"),
+  plot_nimaa_precursor("Spectronaut"),
+  plot_nimaa_precursor("MaxDIA"),
+  ncol = 4
 )
+nimaa_precursor_figure
 ```
+
+
 
 ```{r nimaa-precursor-summary-lollipop, eval=FALSE, fig.width=12, fig.height=5.5, dpi=300}
 library(dplyr)
@@ -3310,6 +3333,8 @@ nimaa_protein_check <- bind_rows(
 
 print(as.data.frame(nimaa_protein_check), row.names = FALSE)
 ```
+
+
 ```{r nimaa-protein-rectangles, eval=run_analysis}
 # Apply the same NIMAA arrangement and element-max rectangle method
 # to the full protein-level incidence matrices.
@@ -3356,9 +3381,35 @@ print(
 )
 ```
 
-```{r nimaa-protein-incidence-figure, eval=FALSE, fig.width=14, fig.height=9, dpi=300}
+```{r nimaa-protein-figure, eval=FALSE, fig.width=14, fig.height=9, dpi=300, message=FALSE}
 library(ggplot2)
 library(patchwork)
+library(dplyr)
+
+# ============================================================
+# PROTEIN-ONLY RASTER
+# Full resolution; no downsampling
+# ============================================================
+
+make_protein_raster <- function(x, color) {
+
+  # Convert the full protein incidence matrix to a raster
+  incidence <- t(x)[
+    ncol(x):1,
+    ,
+    drop = FALSE
+  ]
+
+  as.raster(matrix(
+    c("#FFFFFF", color)[as.integer(incidence) + 1L],
+    nrow = nrow(incidence),
+    ncol = ncol(incidence)
+  ))
+}
+
+# ============================================================
+# PROTEIN PLOT FUNCTION
+# ============================================================
 
 plot_nimaa_protein <- function(software) {
 
@@ -3369,40 +3420,41 @@ plot_nimaa_protein <- function(software) {
 
   stopifnot(nrow(rect) == 1L)
 
-  raster_image <- as.raster(
-    ifelse(
-      t(x)[ncol(x):1, , drop = FALSE] == 1L,
-      software_colors[[software]],
-      "#FFFFFF"
-    )
+  n_features <- nrow(x)
+  n_runs <- ncol(x)
+
+  raster_image <- make_protein_raster(
+    x,
+    software_colors[[software]]
   )
 
   ggplot() +
     annotation_raster(
       raster_image,
       xmin = 0.5,
-      xmax = nrow(x) + 0.5,
+      xmax = n_features + 0.5,
       ymin = 0.5,
-      ymax = ncol(x) + 0.5
+      ymax = n_runs + 0.5
     ) +
     annotate(
       "rect",
       xmin = 0.5,
       xmax = rect$Proteins + 0.5,
-      ymin = ncol(x) - rect$Runs + 0.5,
-      ymax = ncol(x) + 0.5,
+      ymin = n_runs - rect$Runs + 0.5,
+      ymax = n_runs + 0.5,
       fill = "#666666",
       alpha = 0.22,
       colour = "#333333",
       linewidth = 0.7
     ) +
     scale_x_continuous(
-      limits = c(0.5, nrow(x) + 0.5),
+      limits = c(0.5, n_features + 0.5),
+      breaks = scales::breaks_pretty(n = 3),
       labels = scales::label_comma(),
       expand = c(0, 0)
     ) +
     scale_y_reverse(
-      limits = c(ncol(x) + 0.5, 0.5),
+      limits = c(n_runs + 0.5, 0.5),
       breaks = c(1, 20, 40, 60, 83),
       expand = c(0, 0)
     ) +
@@ -3410,43 +3462,57 @@ plot_nimaa_protein <- function(software) {
       title = software,
       subtitle = paste0(
         scales::comma(rect$Proteins),
-        " proteins × ", rect$Runs, " runs"
+        " proteins × ",
+        rect$Runs,
+        " runs"
       ),
       x = "Arranged proteins",
       y = "Arranged runs"
     ) +
-    theme_classic(base_size = 11) +
+    theme_classic(base_size = 18) +
     theme(
-      plot.title = element_text(face = "bold", size = 14),
-      plot.subtitle = element_text(size = 11),
+      plot.title = element_text(
+        face = "bold", size = 23,
+        margin = margin(b = 3)
+      ),
+      plot.subtitle = element_text(
+        size = 17,
+        margin = margin(b = 6)
+      ),
+      axis.title = element_text(
+        size = 18, face = "bold"
+      ),
+      axis.text.y = element_text(size = 16),
+      axis.text.x = element_text(
+        size = 16,
+        angle = 45,
+        hjust = 1,
+        vjust = 1
+      ),
+      axis.ticks = element_line(linewidth = 0.5),
       panel.border = element_rect(
-        colour = "grey50", fill = NA, linewidth = 0.3
-      )
+        colour = "grey50",
+        fill = NA,
+        linewidth = 0.4
+      ),
+      plot.margin = margin(5, 8, 5, 5)
     )
 }
 
-nimaa_protein_figure <- (
-  plot_nimaa_protein("AlphaDIA") |
-  plot_nimaa_protein("DIA-NN")
-) / (
-  plot_nimaa_protein("Spectronaut") |
-  plot_nimaa_protein("MaxDIA")
-) +
-  patchwork::plot_annotation(
-    title = "NIMAA: Complete protein submatrices",
-    subtitle = "Element-max heuristic | 83 original runs per pipeline"
-  )
+# ============================================================
+# FOUR PROTEIN PANELS
+# ============================================================
 
-print(nimaa_protein_figure)
-
-ggsave(
-  "figures/NIMAA_protein_element_max.png",
-  nimaa_protein_figure,
-  width = 14,
-  height = 9,
-  dpi = 300,
-  bg = "white"
+# PROTEIN NIMAA: 1 row × 4 columns
+nimaa_protein_figure <- patchwork::wrap_plots(
+  plot_nimaa_protein("AlphaDIA"),
+  plot_nimaa_protein("DIA-NN"),
+  plot_nimaa_protein("Spectronaut"),
+  plot_nimaa_protein("MaxDIA"),
+  ncol = 4
 )
+
+nimaa_protein_figure
 ```
 
 ```{r nimaa-protein-summary-lollipop, eval= FALSE, fig.width=11, fig.height=5.5, dpi=300}
@@ -6878,6 +6944,7 @@ for (contrast_name in contrast_order) {
   }
 }
 ```
+
 ```{r save_da_upset_plots, message=FALSE, warning=FALSE, eval=FALSE}
 dir.create("figures/DA_UpSet", recursive = TRUE, showWarnings = FALSE)
 
@@ -7738,6 +7805,8 @@ cat("\n\n### Pairwise fold-change agreement summary\n\n")
 
 print(logfc_agreement_summary, n = Inf)
 ```
+
+
 ```{r save_da_logfc_agreement_all, eval=FALSE}
 # Output directory
 output_dir <- "figures/da_logfc_agreement"
@@ -8027,7 +8096,6 @@ cat(
 )
 ```
 ### Temporal patterns of cisplatin response and c-Jun-dependent regulation
-## Temporal patterns of cisplatin response and c-Jun-dependent regulation
 
 The cisplatin response was investigated across untreated baseline, 6-hour,
 and 24-hour conditions in CTRL and c-Jun KO cells. Although the existing
@@ -8936,6 +9004,441 @@ print(p_abundance_precision)
 Abundance-dependent precision was evaluated across 7,483 proteins shared by all four DIA pipelines by examining fitted residual standard deviations across ten within-pipeline protein abundance deciles. All pipelines generally exhibited decreasing residual variability with increasing protein abundance, although the magnitude of this relationship differed considerably. AlphaDIA and DIA-NN demonstrated consistently low residual SDs across most abundance deciles, decreasing from 0.218 and 0.226 in the lowest decile to 0.138 and 0.120 in the highest decile, respectively. MaxDIA exhibited substantially higher residual variability throughout the abundance range, with median SDs decreasing from 0.435 to 0.296, indicating that its reduced quantitative precision was not restricted to low-abundance proteins. Spectronaut displayed the strongest abundance dependence, with residual SD decreasing from 0.628 in the lowest decile to 0.147 in the highest decile, representing a 4.27-fold difference. Although Spectronaut showed particularly high variability among low-abundance proteins, its precision approached that of AlphaDIA and DIA-NN at higher abundance levels. Overall, these findings indicate that DIA-NN and AlphaDIA maintained comparatively stable quantitative precision across the abundance range, whereas MaxDIA exhibited consistently elevated residual variability and Spectronaut was particularly affected at low abundance.
 
 The pronounced abundance-dependent variability observed for Spectronaut is consistent with the unusual low-intensity distribution identified during initial data quality assessment, when intensity values of exactly 1 were detected and subsequently treated as missing values. Despite this preprocessing correction, Spectronaut retained substantially elevated residual variability among low-abundance proteins, whereas its precision approached that of AlphaDIA and DIA-NN at higher abundance levels. This suggests that low-abundance quantification represents a particular limitation in the processed Spectronaut dataset, although the present analysis cannot establish whether the original intensity-value artifact directly contributed to the remaining variability.
+
+```{r save_temporal_precision_results, eval=TRUE, message=FALSE}
+# ============================================================
+# SAVE TEMPORAL RESULTS AND MODEL-DEPENDENT SUMMARIES
+# No model fitting or hypothesis testing is performed here.
+# ============================================================
+
+# 1. Create a separate results directory
+results_cache_dir <- file.path(cache_dir, "statistical_results")
+dir.create(results_cache_dir, recursive = TRUE, showWarnings = FALSE)
+
+# 2. Explicitly named results we want to preserve
+priority_objects <- c(
+  "temporal_joint_summary",
+  "temporal_joint_results",
+  "temporal_interaction_summary",
+  "temporal_interaction_results",
+  "temporal_interaction_agreement",
+  "temporal_interaction_effect_agreement",
+  "temporal_interaction_time_specific",
+  "abundance_precision_summary",
+  "abundance_dependent_precision",
+  "within_condition_variability"
+)
+
+# 3. Find additional relevant objects in the current environment
+all_objects <- ls(envir = .GlobalEnv, all.names = TRUE)
+
+additional_objects <- grep(
+  "temporal|interaction|precision|residual|msqrob|joint|within_condition",
+  all_objects,
+  value = TRUE,
+  ignore.case = TRUE
+)
+
+objects_to_save <- unique(c(priority_objects, additional_objects))
+objects_to_save <- intersect(objects_to_save, all_objects)
+
+# 4. Save each available object separately
+saved <- character()
+failed <- character()
+
+for (nm in objects_to_save) {
+
+  obj <- get(nm, envir = .GlobalEnv, inherits = FALSE)
+
+  # Avoid saving functions, environments, and connections
+  if (is.function(obj) || is.environment(obj) ||
+      inherits(obj, "connection")) {
+    next
+  }
+
+  destination <- file.path(
+    results_cache_dir,
+    paste0(nm, ".rds")
+  )
+
+  tryCatch(
+    {
+      saveRDS(obj, destination, compress = TRUE)
+      saved <- c(saved, nm)
+      message("Saved: ", nm)
+    },
+    error = function(e) {
+      failed <<- c(failed, nm)
+      warning("Could not save ", nm, ": ", conditionMessage(e))
+    }
+  )
+}
+
+# 5. Save a manifest
+manifest <- data.frame(
+  object_name = saved,
+  file_name = paste0(saved, ".rds"),
+  stringsAsFactors = FALSE
+)
+
+saveRDS(
+  manifest,
+  file.path(results_cache_dir, "saved_results_manifest.rds")
+)
+
+# 6. Report what was saved
+cat("\n====================================\n")
+cat("STATISTICAL RESULTS CACHE\n")
+cat("====================================\n")
+cat("Directory:", results_cache_dir, "\n")
+cat("Objects saved:", length(saved), "\n")
+
+if (length(saved) > 0) {
+  print(manifest, row.names = FALSE)
+} else {
+  cat("No matching objects found in the current environment.\n")
+}
+
+if (length(failed) > 0) {
+  cat("\nObjects that failed to save:\n")
+  print(failed)
+}
+```
+
+# Publication-ready multipanel figures
+
+```{r manuscript_export_setup, eval=FALSE}
+library(ggplot2)
+library(patchwork)
+
+manuscript_dir <- file.path(cache_dir, "manuscript_figures")
+plot_backup_dir <- file.path(cache_dir, "manuscript_plot_objects")
+results_dir <- file.path(cache_dir, "statistical_results")
+
+dir.create(manuscript_dir, recursive = TRUE, showWarnings = FALSE)
+
+get_plot <- function(nm) {
+  candidates <- c(
+    file.path(plot_backup_dir, paste0(nm, ".rds")),
+    file.path(results_dir, paste0(nm, ".rds"))
+  )
+
+  for (path in candidates) {
+    if (file.exists(path)) {
+      obj <- readRDS(path)
+      if (inherits(obj, "ggplot") || inherits(obj, "patchwork")) {
+        return(obj)
+      }
+    }
+  }
+
+  if (exists(nm, envir = .GlobalEnv, inherits = FALSE)) {
+    obj <- get(nm, envir = .GlobalEnv)
+    if (inherits(obj, "ggplot") || inherits(obj, "patchwork")) {
+      return(obj)
+    }
+  }
+
+  stop("Plot not found: ", nm)
+}
+
+clean_panel <- function(p) {
+  p + labs(title = NULL, subtitle = NULL, caption = NULL)
+}
+
+export_figure <- function(p, filename, width, height) {
+  saveRDS(p, file.path(manuscript_dir, paste0(filename, ".rds")))
+
+  ggsave(
+    file.path(manuscript_dir, paste0(filename, ".pdf")),
+    plot = p, width = width, height = height,
+    units = "in", device = grDevices::cairo_pdf,
+    bg = "white"
+  )
+
+  ggsave(
+    file.path(manuscript_dir, paste0(filename, ".tiff")),
+    plot = p, width = width, height = height,
+    units = "in", dpi = 600,
+    compression = "lzw", bg = "white"
+  )
+
+  ggsave(
+    file.path(manuscript_dir, paste0(filename, ".png")),
+    plot = p, width = width, height = height,
+    units = "in", dpi = 300, bg = "white"
+  )
+
+  message("Exported: ", filename)
+}
+```
+
+## Fig 2: Identification and coverage
+```{r export_figure_2_identification, eval=FALSE}
+p2a <- clean_panel(get_plot("p_precursor_coverage"))
+p2b <- clean_panel(get_plot("p_upset_precursors"))
+p2c <- clean_panel(get_plot("p_upset_identification"))
+
+fig2 <- (p2a | p2b) / p2c +
+  plot_layout(heights = c(1, 1.2)) +
+  plot_annotation(tag_levels = "A")
+
+export_figure(fig2, "Figure_2_Identification", 13, 10)
+print(fig2)
+```
+
+
+## Fig 3: NIMAA completeness
+
+```{r export_figure3_nimaa_fixed, eval=FALSE, message=FALSE, fig.show='hide'}
+library(ggplot2)
+library(patchwork)
+library(cowplot)
+
+# ============================================================
+# FIGURE 3 — NIMAA COMPLETE SUBMATRICES
+#
+# Top:    Protein NIMAA (4 panels in one row)
+# Bottom: Precursor NIMAA (4 panels in one row)
+#
+# Each row: 1500 x 600 pixels
+# Combined: 1500 x 1200 pixels
+#
+# Uses existing plots — no NIMAA recalculation
+# ============================================================
+
+# 1. GET THE CORRECT PLOT OBJECTS ----------------------------
+
+# Use the newly separated object names
+protein <- get_plot("nimaa_protein_figure")
+precursor <- get_plot("nimaa_precursor_figure")
+
+stopifnot(
+  inherits(protein, "ggplot"),
+  inherits(precursor, "ggplot")
+)
+
+# Do not override fonts: both figures already have
+# manuscript-readable fonts and rotated x-axis labels.
+
+# 2. COMBINE THE TWO FOUR-PANEL ROWS -------------------------
+
+fig3 <- cowplot::plot_grid(
+  protein,
+  precursor,
+  ncol = 1,
+  rel_heights = c(1, 1),
+  align = "v"
+)
+
+# 3. OUTPUT DIRECTORY ---------------------------------------
+
+manuscript_dir <- file.path(
+  cache_dir,
+  "manuscript_figures"
+)
+
+dir.create(
+  manuscript_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# 4. SAVE EDITABLE FIGURE ------------------------------------
+
+saveRDS(
+  fig3,
+  file.path(
+    manuscript_dir,
+    "Figure_3_NIMAA_8Panels.rds"
+  )
+)
+
+# 5. SAVE PNG — 1500 x 1200 PIXELS ---------------------------
+
+ggsave(
+  filename = file.path(
+    manuscript_dir, "Figure_3_NIMAA_8Panels.png"
+  ),
+  plot = fig3,
+  width = 15,
+  height = 12,
+  units = "in",
+  dpi = 100,
+  bg = "white",
+  limitsize = FALSE
+)
+
+cat(
+  "Figure 3 saved successfully.\n",
+  "PNG: 1500 x 1200 pixels\n",
+  "PDF: 5 x 4 inches\n",
+  "Output folder: ", manuscript_dir, "\n"
+)
+```
+**Figure 3. Comparison of complete protein- and precursor-level incidence submatrices across four DIA proteomics analysis pipelines.** Binary detection matrices for AlphaDIA, DIA-NN, Spectronaut, and MaxDIA are shown at the **protein level (top row)** and **precursor level (bottom row)** across 83 experimental runs. Rows and columns of the original incidence matrices were rearranged using the NIMAA framework to reveal patterns of detection completeness. Colored regions indicate observed identifications, whereas white regions represent missing identifications; colors distinguish the four analysis pipelines. Shaded rectangles outlined in dark gray indicate the largest complete submatrices identified using the *rectangular element-max* heuristic, with the corresponding numbers of retained proteins or precursors and runs reported above each panel. The x-axis represents arranged proteins or precursors, and the y-axis represents arranged experimental runs. For visualization, the precursor-level incidence matrices were aggregated into consecutive display bins, with each bin classified as observed when at least 50% of its entries were present. All reported submatrix dimensions and rectangle boundaries were calculated from the original, unaggregated incidence matrices. Differences in the size and shape of the complete submatrices illustrate pipeline-dependent trade-offs between identification depth and data completeness.
+
+
+## Fig 4: NIMAA summary
+```{r export_nimaa_lollipop_nestedness, eval=FALSE, message=FALSE}
+library(ggplot2)
+library(patchwork)
+
+# Restore original figures, including their annotations
+pA <- get_plot("nimaa_precursor_summary_figure")
+pB <- get_plot("nimaa_protein_summary_figure")
+pC <- get_plot("nimaa_nestedness_figure")
+
+# Move existing text labels below the points in A and B
+move_labels <- function(p, xpos) {
+  for (i in seq_along(p$layers)) {
+    if (inherits(p$layers[[i]]$geom, "GeomText")) {
+      p$layers[[i]]$aes_params$x <- xpos
+      p$layers[[i]]$aes_params$hjust <- 0.5
+      p$layers[[i]]$aes_params$vjust <- 0.5
+      p$layers[[i]]$aes_params$size <- 5.5
+      p$layers[[i]]$aes_params$lineheight <- 1.4
+    }
+  }
+  p
+}
+
+pA <- move_labels(pA, xpos = 20)
+pB <- move_labels(pB, xpos = 50)
+
+# Reduce x-axis ticks without changing data limits
+# A and B use percentages on a 0–100 scale
+pA <- pA + scale_x_continuous(
+  breaks = c(0, 20, 40),
+  labels = function(x) paste0(x, "%")
+)
+
+pB <- pB + scale_x_continuous(
+  breaks = c(0, 50, 100),
+  labels = function(x) paste0(x, "%")
+)
+
+# Protein nestedness: existing calculated results
+colors <- c(
+  "AlphaDIA" = "#0072B2", "DIA-NN" = "#E69F00",
+  "Spectronaut" = "#009E73", "MaxDIA" = "#CC79A7"
+)
+
+d <- nimaa_protein_nestedness
+d$Software <- factor(d$Software, levels = rev(names(colors)))
+
+pD <- ggplot(d, aes(Nestedness_temperature, Software,
+                    colour = Software)) +
+  geom_segment(aes(x = 0, xend = Nestedness_temperature,
+                   yend = Software), linewidth = 1) +
+  geom_point(size = 4) +
+  geom_text(aes(label = sprintf("%.2f", Nestedness_temperature)),
+            hjust = -0.25, size = 4.5, colour = "black") +
+  scale_colour_manual(values = colors) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.2))) +
+  labs(x = "Protein nestedness temperature", y = NULL) +
+  theme_minimal()
+
+# Consistent formatting
+fmt <- function(p) p +
+  labs(title = NULL, subtitle = NULL, caption = NULL) +
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 15, face = "bold"),
+    axis.title.x = element_text(size = 15),
+    legend.position = "none",
+    plot.margin = margin(10, 16, 10, 10)
+  )
+
+# One-row layout, more width for annotated panels A and B
+fig_nimaa_summary <- wrap_plots(
+  fmt(pA), fmt(pB), fmt(pC), fmt(pD),
+  ncol = 4,
+  widths = c(1.5, 1.5, 1.1, 1)
+) + plot_annotation(tag_levels = "A")
+
+# Save PNG only
+manuscript_dir <- file.path(cache_dir, "manuscript_figures")
+dir.create(manuscript_dir, recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  file.path(manuscript_dir, "Figure_4_NIMAA_Lollipop_Nestedness.png"),
+  fig_nimaa_summary,
+  width = 24, height = 5.5, units = "in",
+  dpi = 200, bg = "white"
+)
+```
+
+**Figure 4. NIMAA-based assessment of quantitative matrix completeness and nestedness across four DIA proteomics analysis pipelines.** (A) Precursor-level retention of the original quantitative matrix within the largest complete (missing-value-free) submatrix identified by NIMAA. Labels indicate the percentage of the original matrix retained, the number of precursors and their proportion of the original precursor set, and the number of runs retained out of 83. (B) Protein-level retention within the largest complete submatrix. Labels indicate the percentage of the original protein matrix retained, the number of proteins, and the number of runs retained out of 83. (C) Precursor-level nestedness temperature, calculated across 20 repeated NIMAA evaluations per pipeline. Points represent individual evaluations, with annotations showing the mean ± standard deviation. (D) Protein-level nestedness temperature, calculated once per pipeline, with values indicated beside each point. Lower nestedness temperatures indicate more strongly nested missingness patterns. Colors consistently identify AlphaDIA (blue), DIA-NN (orange), Spectronaut (green), and MaxDIA (pink). All analyses were performed on the same 83-sample dataset.
+
+
+## Fig 5: Reproducible and precision
+```{r export_figure_4_precision, eval=FALSE}
+p5a <- clean_panel(get_plot("p_mds_condition"))
+p5b <- clean_panel(get_plot("p_mds_batch"))
+p5c <- clean_panel(get_plot("p_sigma"))
+p5d <- clean_panel(get_plot("p_abundance_precision"))
+
+fig5 <- (p5a | p5b) / (p5c | p5d) +
+  plot_annotation(tag_levels = "A")
+
+export_figure(fig5, "Figure_5_Reproducibility_Precision", 14, 10)
+print(fig5)
+```
+
+## Fig 6: Differential abundance
+```{r export_figure_5_da, eval=FALSE}
+p6a <- clean_panel(get_plot("p_da_heatmap"))
+p6b <- clean_panel(get_plot("p_da_upset_6h"))
+p6c <- clean_panel(get_plot("p_abs_logfc"))
+p6d <- clean_panel(get_plot("p_precision"))
+
+fig6 <- (p6a | p6b) / (p6c | p6d) +
+  plot_annotation(tag_levels = "A")
+
+export_figure(fig6, "Figure_6_Differential_Abundance", 15, 11)
+print(fig6)
+```
+
+
+## Fig 7: Fold-change agreement
+```{r export_figure_6_logfc, eval=FALSE}
+fig7 <- get_plot("p_logfc_agreement_6h") +
+  labs(title = NULL, subtitle = NULL, caption = NULL)
+
+export_figure(fig7, "Figure_7_FoldChange_Agreement", 12, 9)
+print(fig7)
+```
+
+## Fig 8: Temporal interactions
+```{r export_figure_7_temporal, eval=FALSE}
+p8a <- clean_panel(get_plot("p_interaction_agreement"))
+p8b <- clean_panel(get_plot("p_interaction_time_patterns"))
+p8c <- clean_panel(get_plot("p_interaction_effects"))
+
+fig8 <- (p8a | p8b) / p8c +
+  plot_layout(heights = c(1, 1.3)) +
+  plot_annotation(tag_levels = "A")
+
+export_figure(fig8, "Figure_8_Temporal_Interactions", 13, 10)
+print(fig8)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
