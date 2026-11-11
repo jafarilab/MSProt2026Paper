@@ -1453,19 +1453,30 @@ Following precursor-level filtering, intensity values were log2-transformed usin
 # Log2 precursor intensity distributions before normalization
 # 84 runs per software, displayed as overlaid histograms
 # ============================================================
-rm(list = setdiff(ls(), c("cache_dir", "software_names", "filtered_qf_files")))
+# rm(list = setdiff(ls(), c("cache_dir", "software_names", "filtered_qf_files")))
 invisible(gc(verbose = FALSE))
 
+qf_list <- list(
+  AlphaDIA = qf_alpha,
+  `DIA-NN` = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
+)
 set.seed(123)
 
 hist_data <- list()
-
+file_keys <- c(
+  "AlphaDIA"    = "AlphaDIA",
+  "DIA-NN"      = "DIANN",
+  "Spectronaut" = "Spectronaut",
+  "MaxDIA"      = "MaxDIA"
+)
 for (software in names(qf_list)) {
 
   cat("\nLoading and extraxting precursors_log", software, "...\n", sep = "")
   # Load existing filtered QFeatures
-  qf_one <- readRDS(filtered_qf_files[[software]])
-  se <- qf_one[[software]][["precursors_log"]]
+  qf_one <- readRDS(filtered_qf_files[[file_keys[[software]]]])
+  se <- qf_one[["precursors_log"]]
 
   # Sample up to 5,000 nonmissing intensities per run
   run_data <- lapply(seq_len(ncol(se)), function(j) {
@@ -1490,7 +1501,7 @@ for (software in names(qf_list)) {
 hist_data <- dplyr::bind_rows(hist_data)
 
 # Plot all 84 run distributions for each software
-ggplot2::ggplot(
+p_hist_all <- ggplot2::ggplot(
   hist_data,
   ggplot2::aes(
     x = Log2_Intensity,
@@ -1564,7 +1575,7 @@ density_data <- lapply(names(qf_object_names), function(software) {
 
 density_data <- dplyr::bind_rows(density_data)
 
-ggplot2::ggplot(
+p_hist_all_onePlot <- ggplot2::ggplot(
   density_data,
   ggplot2::aes(
     x = Log2_Intensity,
@@ -1599,7 +1610,7 @@ ggplot2::ggplot(
     legend.title = ggplot2::element_blank()
   )
 
-rm(density_data)
+#rm(density_data)
 ```
 Unlike the other three software packages, Spectronaut has a distinctly multimodal intensity distribution, including a sharp peak near log2 intensity = 0 and a broader low-intensity population between approximately 2 and 7. This is particularly suspicious because almost every Spectronaut precursor has a reported intensity in all 84 runs, despite IsImputed = False throughout.
 ### Extra filtering step
@@ -2243,6 +2254,74 @@ sapply(
 )
 ```
 The results strengthen the justification for excluding Group1_c-jun_KO_1, particularly for DIA-NN and MaxDIA (Run chunk 26 to re-check).
+
+
+```{r}
+qf_list <- list(
+  AlphaDIA = qf_alpha,
+  `DIA-NN` = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
+)
+
+set.seed(123)
+
+density_norm <- dplyr::bind_rows(
+  lapply(names(qf_list), function(software) {
+
+    x <- as.vector(
+      SummarizedExperiment::assay(
+        qf_list[[software]][["precursors_norm"]]
+      )
+    )
+
+    x <- x[is.finite(x)]
+
+    if (length(x) > 100000)
+      x <- sample(x, 100000)
+
+    data.frame(
+      Software = software,
+      Log2_Intensity = x
+    )
+  })
+)
+
+p_hist_norm_onePlot <- ggplot2::ggplot(
+  density_norm,
+  ggplot2::aes(
+    x = Log2_Intensity,
+    color = Software,
+    fill = Software
+  )
+) +
+  ggplot2::geom_density(
+    linewidth = 1.1,
+    alpha = 0.22,
+    adjust = 1
+  ) +
+  ggplot2::scale_x_continuous(
+    limits = c(
+      min(-2, min(density_norm$Log2_Intensity) - 2),
+      NA
+    ),
+    expand = ggplot2::expansion(mult = c(0, 0.02))
+  ) +
+  ggplot2::labs(
+    title = "Post-normalization precursor intensity distributions",
+    subtitle = "Pooled normalized log2 intensities across 83 LC-MS runs per software",
+    x = "Normalized log2 precursor intensity",
+    y = "Density",
+    color = "Software",
+    fill = "Software"
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    legend.position = "top",
+    legend.title = ggplot2::element_blank()
+  )
+```
 
 
 ## NIMAA analysis of precursor detection
@@ -3894,6 +3973,7 @@ ggplot2::ggplot(
     strip.text = ggplot2::element_text(face = "bold")
   )
 ```
+
 ```{r qc_completeness_summary, message=FALSE}
 # ============================================================
 # Summarize precursor completeness for all four tools
@@ -9267,31 +9347,147 @@ ggsave(
 
 
 ## Fig 5: Reproducible and precision
+
+
+```{r}
+# Protein intensities after MaxLFQ aggregation
+set.seed(123)
+
+protein_density <- dplyr::bind_rows(
+  lapply(names(qf_list), function(software) {
+
+    x <- as.vector(
+      SummarizedExperiment::assay(
+        qf_list[[software]][["proteins"]]
+      )
+    )
+
+    x <- x[is.finite(x)]
+
+    if (length(x) > 100000)
+      x <- sample(x, 100000)
+
+    data.frame(
+      Software = software,
+      Log2_Intensity = x
+    )
+  })
+)
+
+protein_density$Software <- factor(
+  protein_density$Software,
+  levels = names(qf_list)
+)
+
+p_hist_protein_onePlot <- ggplot2::ggplot(
+  protein_density,
+  ggplot2::aes(
+    x = Log2_Intensity,
+    color = Software,
+    fill = Software
+  )
+) +
+  ggplot2::geom_density(
+    linewidth = 1.1,
+    alpha = 0.22,
+    adjust = 1
+  ) +
+  ggplot2::labs(
+    title = "Protein intensity distributions after MaxLFQ aggregation",
+    subtitle = "Pooled normalized log2 protein intensities across 83 LC-MS runs",
+    x = "Normalized log2 protein intensity",
+    y = "Density",
+    color = NULL,
+    fill = NULL
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    legend.position = "top"
+  )
+
+```
+
+
+
 ```{r export_figure_4_precision, eval=FALSE}
+library(patchwork)
+
 p5a <- clean_panel(get_plot("p_mds_condition"))
 p5b <- clean_panel(get_plot("p_mds_batch"))
 p5c <- clean_panel(get_plot("p_sigma"))
 p5d <- clean_panel(get_plot("p_abundance_precision")) +
-  labs(y = "Median model residual SD\n(log2 scale)") +
-  theme(
-    axis.title.y = element_text(
-      size = 12,
-      color = "black",
-      margin = margin(r = 10)
-    )
+  labs(y = "Median model residual SD\n(log2 scale)")
+
+
+software_colors <- c(
+  AlphaDIA    = "#0072B2",
+  `DIA-NN`    = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA      = "#CC79A7"
+)
+
+# Apply consistent pipeline colors to all three density plots
+apply_software_colors <- function(p) {
+  p +
+    scale_color_manual(values = software_colors) +
+    scale_fill_manual(values = software_colors)
+}
+
+p5e <- apply_software_colors(p5e)
+p5f <- apply_software_colors(p5f)
+p5g <- apply_software_colors(p5g)
+# Precursor intensities: before filtering/normalization
+# Use the same pipeline palette as the existing figures
+p5e <- p_hist_all_onePlot +
+  scale_color_manual(values = software_colors) +
+  scale_fill_manual(values = software_colors) +
+  labs(
+    title = "Precursor intensities before\nfiltering and normalization",
+    subtitle = NULL
   )
 
-fig5 <- (p5a | p5b) / (p5c | p5d) +
-  plot_annotation(tag_levels = "A")&
-  theme(
-    plot.tag = element_text(size = 22, face = "bold")
+p5f <- p_hist_norm_onePlot +
+  scale_color_manual(values = software_colors) +
+  scale_fill_manual(values = software_colors) +
+  labs(
+    title = "Precursor intensities after\n filtering and normalization",
+    subtitle = NULL
   )
 
-export_figure(fig5, "Figure_5_Reproducibility_Precision", 10, 6)
+p5g <- p_hist_protein_onePlot +
+  scale_color_manual(values = software_colors) +
+  scale_fill_manual(values = software_colors) +
+  labs(
+    title = "Protein intensities after MaxLFQ aggregation",
+    subtitle = NULL
+  )
+
+# Assemble Figure 5
+fig5 <- (
+  (p5a | p5b) /
+  (p5c | p5d) /
+  (p5e | p5f) /
+  p5g
+) +
+  plot_layout(
+    heights = c(1.1, 0.9, 0.75, 0.75, 0.75)
+  ) +
+  plot_annotation(tag_levels = "A") &
+  theme(
+    plot.tag = element_text(size = 28, face = "bold")
+  )
+
+export_figure(
+  fig5,
+  "Figure_5_Reproducibility_Precision",
+  12, 14
+)
+
 print(fig5)
-```
-**Figure 5. Comparison of sample-level reproducibility and quantitative precision across four DIA proteomics analysis pipelines.** (A) Multidimensional scaling (MDS) plots showing the distribution of 83 samples processed with AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, colored by experimental condition. (B) MDS plots of the same samples colored by acquisition batch, illustrating batch-associated clustering patterns across pipelines. (C) Distribution of protein-level residual standard deviations (σ) across pipelines, displayed on a logarithmic (log10) scale. Violin plots represent the distribution of residual variability, with embedded boxplots showing the median and interquartile range. Lower residual standard deviations indicate greater quantitative precision. (D) Median protein-level residual standard deviation across ten protein abundance deciles, calculated from log2-transformed protein abundances. Deciles are ordered from lowest (1) to highest (10) protein abundance. Lower values indicate greater quantitative precision. Together, these analyses characterize sample clustering, batch-associated variation, and abundance-dependent quantitative precision across the four DIA analysis pipelines.
 
+```
+**Figure 5. Comparison of sample-level reproducibility, quantitative precision, and intensity distributions across four DIA proteomics analysis pipelines.** (A) Multidimensional scaling (MDS) plots showing the distribution of 83 samples processed with AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, colored by experimental condition. (B) MDS plots of the same samples colored by acquisition batch, illustrating batch-associated clustering patterns across pipelines. (C) Distribution of protein-level residual standard deviations (σ) across pipelines, displayed on a logarithmic (log10) scale. Violin plots represent the distribution of residual variability, with embedded boxplots showing the median and interquartile range. Lower residual standard deviations indicate greater quantitative precision. (D) Median protein-level residual standard deviation across ten protein abundance deciles, calculated from log2-transformed protein abundances. Deciles are ordered from lowest (1) to highest (10) protein abundance. Lower values indicate greater quantitative precision. (E) Pooled precursor-level log2 intensity distributions before filtering and normalization, showing software-dependent differences in intensity distributions. Spectronaut exhibits a pronounced low-intensity population and a sharp peak at log2 intensity = 0, corresponding to intensity values of 1. (F) Pooled precursor-level log2 intensity distributions after filtering and normalization. The sharp Spectronaut peak near zero is substantially reduced, whereas its broader low-intensity population persists, indicating that the distinct distribution is not explained solely by intensity values of 1. (G) Pooled normalized protein-level log2 intensity distributions following MaxLFQ aggregation, illustrating differences in the locations and shapes of protein abundance distributions across pipelines. Density curves in panels E–G represent the relative frequency of observed intensities within each pipeline. Together, these analyses characterize sample clustering, batch-associated variation, abundance-dependent quantitative precision, and software-specific intensity distribution patterns across the four DIA analysis pipelines.
 
 ## Fig 6: Differential abundance
 ```{r export_figure_5_da, eval=FALSE}
