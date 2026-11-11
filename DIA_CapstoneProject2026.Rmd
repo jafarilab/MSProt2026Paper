@@ -38,12 +38,15 @@ stopifnot(dir.exists(cache_dir))
 ```
 
 # Resources
-```{r session_information, echo=FALSE, message=FALSE, warning=FALSE}
-# ============================================================
-# Reproducibility: R environment and package versions
-# ============================================================
 
+```{r packages_and_sessionInfo, echo=FALSE, message=FALSE, warning=FALSE}
+# ============================================================
+# Reproducibility: Load packages and record R environment
+# ============================================================
 packages <- c(
+  "data.table",
+  "tidyverse",
+  "SummarizedExperiment",
   "QFeatures",
   "dplyr",
   "tidyr",
@@ -67,17 +70,21 @@ packages <- c(
   "bipartite"
 )
 
+# ------------------------------------------------------------
+# ------------ Load required packages ------------------
+# ------------------------------------------------------------
+invisible(lapply(packages, function(pkg) {
+  suppressPackageStartupMessages(
+    library(pkg, character.only = TRUE)
+  )
+}))
+
+
 package_info <- data.frame(
   Package = packages,
   Version = vapply(
     packages,
-    function(pkg) {
-      if (requireNamespace(pkg, quietly = TRUE)) {
-        as.character(utils::packageVersion(pkg))
-      } else {
-        "NOT INSTALLED"
-      }
-    },
+    function(pkg) as.character(utils::packageVersion(pkg)),
     character(1)
   ),
   stringsAsFactors = FALSE
@@ -123,7 +130,7 @@ localRepo <- "Mohi"
 
 if (localRepo == 'Mohi'){
   base_dir <- path.expand("/Users/nvd448/Documents/MSProt2026/")
-  
+
   file_alpha <- file.path(base_dir,
                           "Search_outputs/AlphaDIA/precursor.matrix.tsv")
   file_diann <- file.path(base_dir,
@@ -170,20 +177,20 @@ read_precursors <- function(software) {
     header <- names(data.table::fread(file_alpha, nrows = 0L))
     run_cols <- header[2:85]
     stopifnot(length(run_cols) == 84L)
-    
+
     dt <- fread(file_alpha, colClasses = c(precursor.mod_seq_charge_hash = "character",
                 setNames(rep("character", length(run_cols)), run_cols)))
 
     id_cols <- c("precursor.mod_seq_charge_hash", "precursor.sequence",
                  "precursor.charge", "pg.name")
     stopifnot(all(id_cols %in% names(dt)))
-    
+
     dt <- melt(dt, id.vars = id_cols, measure.vars = run_cols,
                variable.name = "Run", value.name = "Precursor.Quantity",
                variable.factor = FALSE)
-    
+
     dt[, Precursor.Quantity := readr::parse_double(Precursor.Quantity)]
-    
+
     setnames(dt, id_cols,
              c("Precursor.Id", "Stripped.Sequence", "Precursor.Charge",
                "Protein.Group"))
@@ -220,7 +227,7 @@ read_precursors <- function(software) {
     "DIA evidence type",
     "Score", "ML score",
     "Match score", "Match q-value")
-    
+
     dt <- fread(file_maxdia, select = old,
                 colClasses = list(character = c(
                   "Raw file", "Modified sequence", "Sequence",
@@ -237,7 +244,7 @@ read_precursors <- function(software) {
   )
     dt[, Intensity := readr::parse_double(Intensity)]
     stopifnot(all(old %in% names(dt)))
-    
+
     setnames(dt, old, c(
     "Run", "Modified.Sequence", "Stripped.Sequence",
     "Precursor.Charge", "Protein.Group", "Protein.Ids",
@@ -246,30 +253,30 @@ read_precursors <- function(software) {
     "DIA.evidence.type",
     "Score", "ML.Score",
     "Match.Score", "Match.Q.Value"))
-    
+
     dt[, Precursor.Id := paste(Modified.Sequence, Precursor.Charge, sep = "_")]
 
   } else stop("Unknown software: ", software)
 
-  
+
   # ------------------------------------------------------------
   # Standardize missing text annotations
   # ------------------------------------------------------------
-  
+
   for (field in intersect(
     c("Genes", "Reverse", "Potential.contaminant"),
     names(dt)
   )) {
-  
+
     v <- dt[[field]]
-  
+
     if (is.character(v)) {
       # Empty or whitespace-only strings become NA
       v[!is.na(v) & trimws(v) == ""] <- NA_character_
       data.table::set(dt, j = field, value = v)
     }
   }
-  
+
   # Apply filename standardization to distinct run labels (not 20 million rows).
   original_runs <- unique(as.character(dt$Run))
   cleaned_runs <- sub("\\.raw$", "", basename(original_runs), ignore.case = TRUE)
@@ -350,13 +357,13 @@ cleaned_precursors <- setNames(vector("list", length(software_names)),
 for (software in software_names) {
   message("\n======== ", software, " ========")
   start_time <- Sys.time()
-  
+
   message("Loading ...")
   dt <- read_precursors(software)
-  
+
   message("cleaning ...")
   cleaned_precursors[[software]] <- clean_precursors(dt, software)
-  
+
   message(sprintf("Done! %s (%.2f minutes)", software,
                   as.numeric(difftime(Sys.time(), start_time, units = "mins"))))
   rm(dt)
@@ -378,34 +385,34 @@ Evaluate the available identification confidence scores, including PEP, Cscore, 
 # ------------------------------------------------------------
 
 get_identification_class <- function(dt) {
-  
+
   if ("Decoy" %in% names(dt)) {
-    
+
     v <- toupper(trimws(as.character(dt$Decoy)))
-    
+
     class <- rep(NA_character_, length(v))
-    
+
     class[v %in% c("FALSE", "0", "TARGET")] <- "Target"
     class[v %in% c("TRUE", "1", "DECOY")] <- "Decoy"
-    
+
     return(class)
   }
-  
+
   if ("Reverse" %in% names(dt)) {
-    
+
     # MaxDIA: "+" = Decoy; blank/NA = Target
     v <- toupper(trimws(as.character(dt$Reverse)))
-    
+
     class <- rep(NA_character_, length(v))
-    
+
     class[is.na(v) |
             v %in% c("", "-", "FALSE", "0")] <- "Target"
-    
+
     class[v %in% c("+", "TRUE", "1")] <- "Decoy"
-    
+
     return(class)
   }
-  
+
   NULL
 }
 
@@ -414,15 +421,15 @@ get_identification_class <- function(dt) {
 # ------------------------------------------------------------
 
 inspect_scores <- function(dt, software, plot_scores = TRUE) {
-  
+
   score_candidates <- c(
     "PEP", "Cscore", "Q.Value",
     "Score", "ML.Score",
     "Match.Score", "Match.Q.Value"
   )
-  
+
   scores <- intersect(score_candidates, names(dt))
-  
+
   scores <- scores[
     vapply(
       scores,
@@ -430,62 +437,62 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
       logical(1)
     )
   ]
-  
+
   cat("\n",
       "====================================================\n",
       " IDENTIFICATION SCORE QC: ", software, "\n",
       "====================================================\n",
       sep = "")
-  
+
   cat("Total runs:", uniqueN(dt$Run), "\n")
   cat("Total precursor-run records:",
       format(nrow(dt), big.mark = ","), "\n")
-  
+
   if (!length(scores)) {
     cat("No identification score columns available.\n")
     return(invisible(NULL))
   }
-  
+
   cat("Scores available:",
       paste(scores, collapse = ", "), "\n\n")
-  
+
   # Determine Target/Decoy class
   class <- get_identification_class(dt)
-  
+
   if (is.null(class)) {
     class <- rep("All", nrow(dt))
     message(software, ": no Target/Decoy annotation")
   }
-  
+
   if (anyNA(class)) {
     warning(
       software, ": ", sum(is.na(class)),
       " records have unknown identification class"
     )
   }
-  
+
   # Temporary column (removed on exit)
   dt[, .QC_Class := class]
-  
+
   on.exit(
     dt[, .QC_Class := NULL],
     add = TRUE
   )
-  
+
   cat("Identification classes:\n")
-  
+
   print(
     dt[, .(N = .N), by = .QC_Class][
       order(.QC_Class)
     ]
   )
-  
+
   # ----------------------------------------------------------
   # Process each available score
   # ----------------------------------------------------------
-  
+
   for (score in scores) {
-    
+
     cat("\n",
         "----------------------------------------------------\n",
         " Software: ", software, "\n",
@@ -494,14 +501,14 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
         " Unit: precursor-run observations\n",
         "----------------------------------------------------\n",
         sep = "")
-    
+
     # Summary over ALL precursor-run records
     qc <- dt[
       !is.na(.QC_Class),
       {
         values <- get(score)
         finite <- values[is.finite(values)]
-        
+
         .(
           records = .N,
           valid_scores = length(finite),
@@ -521,18 +528,18 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
       },
       by = .(.QC_Class)
     ][order(.QC_Class)]
-    
+
     setnames(qc, ".QC_Class", "Class")
-    
+
     # Descriptive caption attached to the table
     table_title <- paste0(
       software, " | ", score,
       " — Target/Decoy summary across ",
       uniqueN(dt$Run), " LC-MS runs"
     )
-    
+
     cat("\n\n")
-    
+
     cat(
       as.character(
         knitr::kable(
@@ -544,11 +551,11 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
         )
       )
     )
-    
+
     cat("\n\n")
-    
+
     if (!plot_scores) next
-    
+
     # --------------------------------------------------------
     # Calculate density using ALL scores in each run
     # --------------------------------------------------------
@@ -558,7 +565,7 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
     # Only the calculated density coordinates are retained
     # for ggplot, avoiding enormous plot data frames.
     # --------------------------------------------------------
-    
+
     score_range <- range(dt[[score]], finite = TRUE)
 
     if (!all(is.finite(score_range)) ||
@@ -567,21 +574,21 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
               ": insufficient score variation")
       next
     }
-    
+
     density_dt <- dt[
       ,
       {
         values <- get(score)
         values <- values[is.finite(values)]
-    
+
         if (is.na(.QC_Class[1L]) ||
             length(values) < 2L ||
             min(values) == max(values)) {
-    
+
           NULL
-    
+
         } else {
-    
+
           den <- stats::density(
             values,
             n = 512L,
@@ -589,7 +596,7 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
             to = score_range[2L],
             na.rm = TRUE
           )
-    
+
           .(
             Value = den$x,
             Density = den$y
@@ -598,27 +605,27 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
       },
       by = .(Run, Class = .QC_Class)
     ]
-    
+
     if (nrow(density_dt) == 0L) {
       message("No density curves for ", software, " / ", score)
       next
     }
-    
+
     density_dt[
       , Class := factor(
         Class,
         levels = c("Target", "Decoy", "All")
       )
     ]
-    
+
     # --------------------------------------------------------
     # Plot all 84 run-specific density curves
     # --------------------------------------------------------
-    
+
     mean_density <- density_dt[,
                                .(MeanDensity = mean(Density)),
                                by = .(Class, Value)]
-    
+
     p <- ggplot() +
 
     # All run-specific curves: transparent
@@ -634,7 +641,7 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
       alpha = 0.12,
       show.legend = FALSE
     ) +
-  
+
     # Thick average curve for each identification class
     geom_line(
       data = mean_density,
@@ -648,7 +655,7 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
       alpha = 1,
       show.legend = TRUE
     ) +
-  
+
     scale_color_manual(
       values = c(
         Target = "#E76F66",
@@ -657,7 +664,7 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
       ),
       drop = TRUE
     ) +
-  
+
     guides(
       color = guide_legend(
         override.aes = list(
@@ -666,7 +673,7 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
         )
       )
     ) +
-  
+
     labs(
       title = paste0(software, " | ", score, " distribution"),
       subtitle = paste0(
@@ -678,27 +685,27 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
       y = "Density",
       color = "Identification"
     ) +
-  
+
     theme_classic(base_size = 13) +
-  
+
     theme(
       plot.title = element_text(face = "bold"),
       legend.position = "top"
     )
-  
+
   print(p)
-    
-    
+
+
     cat(
       "\nDensity curves generated for",
       uniqueN(density_dt$Run),
       "runs | Score:", score,
       "| Software:", software, "\n"
     )
-    
+
     rm(density_dt, mean_density)
   }
-  
+
   invisible(NULL)
 }
 
@@ -710,11 +717,11 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
 for (software in software_names) {
   message("\n======== ", software, " ========")
   start_time <- Sys.time()
-  
+
   inspect_scores(cleaned_precursors[[software]],
                  software,
                  plot_scores = TRUE)
-  
+
   message(sprintf("Done! %s (%.2f minutes)", software,
                   as.numeric(difftime(Sys.time(), start_time, units = "mins"))))
 
@@ -746,7 +753,7 @@ make_sample_annotation <- function(runs) {
                 sub(".*?([0-9]+)$", "\\1", sampleId, perl = TRUE), NA_character_)
   condition <- ifelse(!is.na(genotype) & !is.na(time),
                       paste(genotype, treatment, time, sep = "_"), NA_character_)
-  
+
   DataFrame(runCol = runs, sampleId = sampleId, sample_set = sample_set,
             genotype = factor(genotype), treatment = factor(treatment),
             time = factor(time), rep = factor(rep),
@@ -762,24 +769,24 @@ make_combined_qf <- function(dt, software) {
   ri <- match(dt$Precursor.Id, ids)
   ci <- match(dt$Run, runs)
   stopifnot(!anyNA(ri), !anyNA(ci))
-  
+
   # Column-major linear indexing, no 84-way merge and no large cbind() index.
   pos <- (ci - 1L) * n + ri
   if (anyDuplicated(pos)) stop(software, ": duplicate precursor-run positions")
   mat <- matrix(NA_real_, nrow = n, ncol = nr,
                 dimnames = list(ids, runs))
   mat[pos] <- dt$Precursor.Quantity
-  
-  
+
+
   # ------------------------------------------------------------
   # Retain only consistent precursor-level metadata
   # ------------------------------------------------------------
-  
+
   rd <- DataFrame(
     Precursor.Id = ids,
     row.names = ids
   )
-  
+
   # Identification scores were already examined in Chunk 3.
   # Do not include them in the combined QFeatures.
   score_fields <- c(
@@ -787,61 +794,61 @@ make_combined_qf <- function(dt, software) {
     "Score", "ML.Score",
     "Match.Score", "Match.Q.Value"
   )
-  
+
   # Fields that belong to the intensity matrix or sample metadata
   base_fields <- c(
     "Run", "Precursor.Id", "Precursor.Quantity"
   )
-  
+
   # Identify score columns to remove
   removed_scores <- intersect(names(dt), score_fields)
-  
+
   # Remaining precursor metadata columns
   fields <- setdiff(
     names(dt),
     c(base_fields, score_fields)
   )
-  
+
   # Essential fields must be consistent
   identity_fields <- c(
     "Decoy", "IsDecoy", "isDecoy",
     "Reverse", "Precursor.Charge"
   )
-  
+
   retained_fields <- character()
   dropped_fields <- character()
-  
+
   for (field in fields) {
-  
+
     v <- dt[[field]]
-  
+
     if (is.factor(v)) {
       v <- as.character(v)
     }
-  
+
     # Skip unsupported data types
     if (!is.atomic(v) || !is.null(dim(v))) {
       dropped_fields <- c(dropped_fields, field)
       message(software, ": unsupported metadata: ", field)
       next
     }
-  
+
     # One representative nonmissing value per precursor
     retained <- rep(v[NA_integer_], n)
-  
+
     observed <- which(!is.na(v))
-  
+
     if (length(observed) > 0L) {
       retained[ri[observed]] <- v[observed]
     }
-  
+
     # Check whether a precursor has conflicting values
     conflict <- !is.na(v) & v != retained[ri]
-  
+
     inconsistent <- any(conflict)
-  
+
     if (inconsistent) {
-  
+
       # Conflicting identity/decoy annotations should not be ignored
       if (field %in% identity_fields) {
         stop(
@@ -850,55 +857,55 @@ make_combined_qf <- function(dt, software) {
           field
         )
       }
-  
+
       dropped_fields <- c(dropped_fields, field)
-  
+
     } else {
-  
+
       # Retain consistent metadata
       rd[[field]] <- retained
       retained_fields <- c(retained_fields, field)
     }
   }
-  
+
   # ------------------------------------------------------------
   # Report metadata processing
   # ------------------------------------------------------------
-  
+
   message("\n--- ", software, ": rowData summary ---")
-  
+
   message(
     "Retained metadata: ",
     if (length(retained_fields)) {
       paste(retained_fields, collapse = ", ")
     } else "None"
   )
-  
+
   message(
     "Dropped inconsistent metadata: ",
     if (length(dropped_fields)) {
       paste(dropped_fields, collapse = ", ")
     } else "None"
   )
-  
+
   message(
     "Excluded identification scores: ",
     if (length(removed_scores)) {
       paste(removed_scores, collapse = ", ")
     } else "None"
   )
-  
+
   message(
     "Final rowData: ",
     nrow(rd), " precursors x ",
     ncol(rd), " metadata columns"
   )
-  
+
   # Verify that no identification scores were retained
   stopifnot(
     !any(score_fields %in% colnames(rd))
   )
-  
+
   # Verify precursor identity
   stopifnot(
     identical(rownames(rd), ids),
@@ -906,13 +913,13 @@ make_combined_qf <- function(dt, software) {
   )
 
   cd <- make_sample_annotation(runs)
-  
+
   se <- SummarizedExperiment(
     assays = list(intensity = mat), rowData = rd, colData = cd
   )
-  
+
   qf <- QFeatures(list(precursors = se), colData = cd)
-  
+
   stopifnot(
     ncol(qf[["precursors"]]) == 84L,
     identical(rownames(qf[["precursors"]]),
@@ -933,29 +940,29 @@ for (software in software_names) {
     message("Already exists, skipping: ", software)
     next
   }
-  
+
   message("\nProcessing ", software, "...")
   start_time <- Sys.time()
-  
+
   # Combine 84 runs by Precursor.Id
   qf_combined <- make_combined_qf(cleaned_precursors[[software]], software)
-  
+
   gc(verbose = FALSE)
-  
+
   se <- qf_combined[["precursors"]]
   x <- assay(se, withDimnames = FALSE)
-  
+
   stopifnot(ncol(se) == 84L, sum(x == 0, na.rm = TRUE) == 0L,
             identical(rownames(se), as.character(rowData(se)$Precursor.Id)),
             identical( colnames(se), rownames(colData(se))))
-  
+
   message(sprintf("Combined: %s precursors x %s runs | zeros: %s | NA: %s",
                   nrow(se), ncol(se), sum(x == 0, na.rm = TRUE), sum(is.na(x))))
-  
+
   rm(se, x)
-  # Save 
+  # Save
   saveRDS(qf_combined, output, compress = "gzip")
-  
+
   message(sprintf("Saved %s (%.2f minutes)", output,
                   as.numeric(difftime(Sys.time(), start_time, units = "mins"))))
   rm(qf_combined)
@@ -973,16 +980,9 @@ The four saved QFeatures objects are reloaded individually to summarize their di
 # Inspect one software at a time
 # ============================================================
 
-rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+rm(list = setdiff(ls(), c("cache_dir", "software_names", "combined_qf_files")))
 invisible(gc(verbose = FALSE))
 
-combined_qf_files <- setNames(
-  file.path(
-    cache_dir,
-    paste0("qf_", software_names, "_combined.rds")
-  ),
-  software_names
-)
 
 # Confirm all four files exist
 if (!all(file.exists(combined_qf_files))) {
@@ -994,45 +994,45 @@ combined_summary <- vector("list", length(software_names))
 names(combined_summary) <- software_names
 
 for (software in software_names) {
-  
+
   qf <- readRDS(combined_qf_files[[software]])
   se <- qf[["precursors"]]
   x <- SummarizedExperiment::assay(se, withDimnames = FALSE)
-  
+
   n_precursors <- nrow(se)
   n_runs <- ncol(se)
   total_values <- as.double(n_precursors) * n_runs
-  
+
   # Count quantified observations without making
   # a full-size logical matrix
   per_run <- integer(n_runs)
   per_precursor <- integer(n_precursors)
-  
+
   n_missing <- 0
   n_zero <- 0
-  
+
   for (j in seq_len(n_runs)) {
-    
+
     v <- x[, j]
-    
+
     missing <- is.na(v)
     zero <- !missing & v == 0
     observed <- !missing & v > 0
-    
+
     n_missing <- n_missing + sum(missing)
     n_zero <- n_zero + sum(zero)
-    
+
     per_run[j] <- sum(observed)
     per_precursor <- per_precursor + as.integer(observed)
   }
-  
+
   n_quantified <- sum(per_run)
-  
+
   stopifnot(
     n_runs == 84L,
     n_quantified + n_missing + n_zero == total_values
   )
-  
+
   combined_summary[[software]] <- data.frame(
     Software = software,
     Precursors = n_precursors,
@@ -1048,7 +1048,7 @@ for (software in software_names) {
     RowData_Columns = ncol(rowData(se)),
     ColData_Columns = ncol(colData(se))
   )
-  
+
   rm(qf, se, x, per_run, per_precursor)
   gc(verbose = FALSE)
 }
@@ -1059,24 +1059,10 @@ print(tibble::as_tibble(combined_summary), width = Inf)
 
 ```
 
-## 6. Load qfs
 
-```{r load_all_combined_qfeatures, message=FALSE}
-# ============================================================
-# Load all four combined QFeatures objects into R environment
-# ============================================================
-rm(list = setdiff(ls(), c("cache_dir", "software_names", "combined_qf_files")))
-invisible(gc(verbose = FALSE))
+## 6. Filtering
 
-qf_alpha <- readRDS(combined_qf_files[["AlphaDIA"]])
-qf_spectro <- readRDS(combined_qf_files[["Spectronaut"]])
-qf_maxdia <- readRDS(combined_qf_files[["MaxDIA"]])
-qf_diann <- readRDS(combined_qf_files[["DIANN"]])
-
-```
-
-## Filtering
-```{r filter_combined_precursors, message=FALSE, eval=run_analysis}
+```{r filter_combined_precursors, message=TRUE, eval=run_analysis}
 # ============================================================
 # Filter combined precursor-level QFeatures
 #
@@ -1089,19 +1075,11 @@ qf_diann <- readRDS(combined_qf_files[["DIANN"]])
 # Proteotypic status cannot yet be verified for AlphaDIA
 # and Spectronaut using their current combined rowData.
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names", "combined_qf_files")))
+invisible(gc(verbose = FALSE))
 
-software_names <- c(
-  "AlphaDIA", "DIANN", "Spectronaut", "MaxDIA"
-)
 
-## there is a conflict between this part and Recovery of protien level qfs
-# filtered_qf_files <- setNames(
-#   file.path(
-#     cache_dir,
-#     paste0("qf_", software_names, "_filtered_final.rds")
-#   ),
-#   software_names
-# )
+filtered_qf_files <- gsub('_combined.rds', '_filtered_final.rds', combined_qf_files)
 
 filter_summary <- list()
 
@@ -1274,11 +1252,10 @@ for (software in software_names) {
     Software = software,
     Before = n_before,
     Passed_Detection = sum(keep_detection),
+    Passed_Annotations = sum(keep_ids),
     Passed_Quality = sum(keep_quality),
     Passed_Proteotypic = sum(keep_proteotypic),
-    Unknown_Proteotypic_After_Filter = sum(
-      keep & proteotypic_unknown
-    ),
+    Unknown_Proteotypic_After_Filter = sum(keep & proteotypic_unknown),
     Retained = sum(keep),
     Removed = sum(!keep),
     Retained_Percent = round(100 * mean(keep), 2)
@@ -1287,7 +1264,6 @@ for (software in software_names) {
   # ----------------------------------------------------------
   # 8. Filter QFeatures
   # ----------------------------------------------------------
-
   qf_filtered <- qf_one[keep, , ]
 
   filtered_se <- qf_filtered[["precursors"]]
@@ -1308,14 +1284,7 @@ for (software in software_names) {
   # 9. Save filtered QFeatures
   # ----------------------------------------------------------
 
-  output_file <- filtered_qf_files[[software]]
-  temp_file <- paste0(output_file, ".tmp")
-
-  saveRDS(qf_filtered, temp_file)
-
-  if (!file.rename(temp_file, output_file)) {
-    stop("Could not save filtered QFeatures for ", software)
-  }
+  saveRDS(qf_filtered, filtered_qf_files[[software]])
 
   message(
     software, ": ",
@@ -1419,75 +1388,61 @@ ggplot2::ggplot(
   )
 ```
 
-## Log-transformation
+## 7. Log-transformation
+
 ```{r precursor_histograms_before_normalization, eval=FALSE, fig.width=12, fig.height=7}
 # ============================================================
 # Log2 transformation of filtered precursor intensities
 # Update existing filtered QFeatures files and R objects
 # ============================================================
-
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  DIANN = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
-)
+rm(list = setdiff(ls(), c("cache_dir", "software_names", "filtered_qf_files")))
+invisible(gc(verbose = FALSE))
 
 for (software in software_names) {
 
-  message("Log2-transforming ", software, "...")
+  cat("\nLog2-transforming ", software, "...\n", sep = "")
 
   # Load existing filtered QFeatures
   qf_one <- readRDS(filtered_qf_files[[software]])
 
   # Add log2-transformed assay
   if (!"precursors_log" %in% names(qf_one)) {
-    qf_one <- QFeatures::logTransform(
-      qf_one,
-      base = 2,
-      i = "precursors",
-      name = "precursors_log"
-    )
-  }
 
-  # Verify both assays
-  stopifnot(
-    all(c("precursors", "precursors_log") %in% names(qf_one)),
-    identical(
-      dim(qf_one[["precursors"]]),
-      dim(qf_one[["precursors_log"]])
-    )
-  )
+    # Log2 requires strictly positive finite intensities.
+    # Missing observations (NA) are allowed.
+    x <- assay(qf_one[["precursors"]], withDimnames = FALSE)
+    stopifnot(!any(x <= 0, na.rm = TRUE), !any(is.infinite(x)))
+    rm(x)
+
+    qf_one <- QFeatures::logTransform(qf_one,
+                                      base = 2, pc = 0,
+                                      i = "precursors",
+                                      name = "precursors_log")
+    }
 
   # Overwrite existing filtered cache file
   saveRDS(qf_one, filtered_qf_files[[software]])
 
-  # Update the corresponding R object
-  assign(qf_object_names[[software]], qf_one, envir = .GlobalEnv)
 
-  message(
-    software, ": ",
-    nrow(qf_one[["precursors_log"]]),
-    " precursors × ",
-    ncol(qf_one[["precursors_log"]]),
-    " runs"
+  # Verify assay structure
+  raw_se <- qf_one[["precursors"]]
+  log_se <- qf_one[["precursors_log"]]
+
+  stopifnot(
+    identical(dim(raw_se), dim(log_se)),
+    identical(rownames(raw_se), rownames(log_se)),
+    identical(colnames(raw_se), colnames(log_se))
   )
 
-  rm(qf_one)
-  gc(verbose = FALSE)
+  cat(sprintf("%s: %s precursors x %s runs",
+    software, nrow(log_se), ncol(log_se)))
+
+  plot(qf_one, main=software)
+
+  rm(qf_one, raw_se, log_se)
+  invisible(gc(verbose = FALSE))
 }
 
-# Verify assay structure in each object
-lapply(
-  mget(unname(qf_object_names)),
-  names
-)
-
-# Visualize QFeatures structures
-plot(qf_alpha)
-plot(qf_diann)
-plot(qf_spectro)
-plot(qf_maxdia)
 ```
 Following precursor-level filtering, intensity values were log2-transformed using the `logTransform()` function from the QFeatures package to reduce right-skewness and improve comparability of quantitative measurements. The transformed intensities were stored in a new assay named precursors_log, while the original filtered intensities were preserved in precursors. Both assays were retained within each software-specific QFeatures object (`qf_alpha`, `qf_diann`, `qf_spectro`, and `qf_maxdia`), maintaining their metadata and processing relationships for subsequent analysis.
 
@@ -1498,13 +1453,8 @@ Following precursor-level filtering, intensity values were log2-transformed usin
 # Log2 precursor intensity distributions before normalization
 # 84 runs per software, displayed as overlaid histograms
 # ============================================================
-
-qf_list <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
+rm(list = setdiff(ls(), c("cache_dir", "software_names", "filtered_qf_files")))
+invisible(gc(verbose = FALSE))
 
 set.seed(123)
 
@@ -1512,7 +1462,10 @@ hist_data <- list()
 
 for (software in names(qf_list)) {
 
-  se <- qf_list[[software]][["precursors_log"]]
+  cat("\nLoading and extraxting precursors_log", software, "...\n", sep = "")
+  # Load existing filtered QFeatures
+  qf_one <- readRDS(filtered_qf_files[[software]])
+  se <- qf_one[[software]][["precursors_log"]]
 
   # Sample up to 5,000 nonmissing intensities per run
   run_data <- lapply(seq_len(ncol(se)), function(j) {
@@ -1570,6 +1523,8 @@ ggplot2::ggplot(
     plot.title = ggplot2::element_text(face = "bold")
   )
 ```
+
+
 
 ```{r precursor_density_before_normalization_extra, eval=FALSE, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
 
@@ -4703,7 +4658,7 @@ ggplot2::ggplot(
 The correlation matrices reveal high overall protein-level similarity between samples, but clear software-dependent differences and batch-associated variation. DIA-NN exhibits the strongest correlations (median 0.976), with only a small difference between within-batch (0.986) and between-batch (0.974) correlations, indicating highly consistent protein abundance rankings across runs. AlphaDIA and Spectronaut show good overall correlations (medians 0.851 and 0.817), but noticeably higher within-batch than between-batch similarity (differences of 0.084 and 0.093, respectively), supporting the batch effects observed in MDS. MaxDIA displays the lowest overall correlation (median 0.731), the lowest minimum correlation (0.521), and greater sample-to-sample variability. Overall, these findings reinforce the importance of accounting for acquisition batch during differential abundance modeling, particularly for AlphaDIA, Spectronaut, and MaxDIA.
 
 # Data modeling
-The experimental design also shows that 6-hour treatments were acquired in Groups 3–4, while 24-hour treatments were acquired in Groups 1–2 and 20260331. 
+The experimental design also shows that 6-hour treatments were acquired in Groups 3–4, while 24-hour treatments were acquired in Groups 1–2 and 20260331.
 This means direct 6-hour versus 24-hour comparisons are particularly vulnerable to batch confounding. However, comparisons such as KO versus CTRL within the same treatment and time point are better supported because those conditions share acquisition batches.
 
 Here, condition represents your eight biological experimental groups, while Batch accounts for systematic differences between the five acquisition batches.
@@ -6376,7 +6331,7 @@ print(p_precursor_coverage)
 
 To investigate the discrepancy between MaxDIA's high precursor-level coverage and its comparatively lower protein-group identification count, the number of distinct peptide sequence–charge combinations assigned to each protein group was examined. MaxDIA exhibited the highest mean (27.1) and median (20) sequence–charge combinations per protein group, compared with Spectronaut (19.9 and 13), DIA-NN (19.2 and 12), and AlphaDIA (16.0 and 10), respectively. Furthermore, 99.1% of MaxDIA-specific sequence–charge combinations were associated with protein accessions also identified by at least one other pipeline. Together, these findings indicate that MaxDIA's increased precursor-level identification coverage predominantly reflects greater sequence–charge representation of already identified proteins rather than a proportional expansion of protein-group coverage. Nevertheless, differences in precursor reporting, protein inference, and filtering may also contribute to the observed variation.
 
-### Differential abundance comparison 
+### Differential abundance comparison
 ```{r da_summary_all_pipelines, message=FALSE, warning=FALSE, eval=FALSE}
 # ============================================================
 # Differential abundance summary: 4 pipelines x 11 contrasts
@@ -7113,7 +7068,7 @@ p_abs_logfc <- ggplot(
 print(p_abs_logfc)
 ```
 
-These results are important because they challenge our earlier hypothesis that MaxDIA detects fewer differentially abundant proteins primarily because it estimates smaller fold changes. 
+These results are important because they challenge our earlier hypothesis that MaxDIA detects fewer differentially abundant proteins primarily because it estimates smaller fold changes.
 
 Comparison of absolute protein-level log2 fold-change distributions for the KO versus CTRL cisplatin 6h contrast showed that MaxDIA's lower number of significant protein groups was not accompanied by uniformly smaller estimated abundance changes. Among 7,474 protein groups with finite fold-change estimates in all four pipelines, the median absolute log2 fold change was 0.156 for AlphaDIA, 0.184 for DIA-NN, 0.215 for Spectronaut, and 0.181 for MaxDIA. Spectronaut exhibited the largest overall effect-size distribution, whereas MaxDIA showed magnitudes broadly comparable to DIA-NN and greater than AlphaDIA. These results do not support systematic attenuation of fold-change magnitudes as the principal explanation for MaxDIA's reduced differential abundance detection. Together with its weaker cross-pipeline fold-change correlations and higher median model residual variability, the findings suggest that differences in quantitative precision and statistical uncertainty may contribute to the observed discrepancies. Direct comparison of contrast-specific standard errors is required to evaluate this explanation.
 
