@@ -2621,7 +2621,7 @@ precursor_plot_data <- nimaa_lollipop_data |>
       levels = rev(c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"))
     ),
     Label = sprintf(
-      "%.1f%% matrix  |  %s precursors (%.1f%%)  |  %d/83 runs",
+      "%.1f%% matrix\n%s precursors (%.1f%%)  |  %d/83 runs",
       Matrix_pct,
       scales::comma(Precursors),
       Precursor_pct,
@@ -2647,7 +2647,6 @@ nimaa_precursor_summary_figure <- ggplot(
     aes(label = Label),
     hjust = -0.08,
     size = 4,
-    fontface = "bold",
     colour = "black"
   ) +
   scale_colour_manual(values = software_colors) +
@@ -2808,8 +2807,8 @@ nimaa_nestedness_figure <- ggplot() +
     data = nestedness_plot_summary,
     aes(x = Mean + SD + 0.8, y = Software, label = Label),
     hjust = 0,
-    size = 4.5,
-    fontface = "bold"
+    vjust = 0.5,
+    size = 4.5
   ) +
   scale_colour_manual(values = software_colors) +
   scale_x_continuous(
@@ -3351,7 +3350,7 @@ protein_plot_data <- nimaa_protein_rectangles |>
       levels = rev(c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"))
     ),
     Label = sprintf(
-      "%.1f%%  |  %s proteins  |  %d/83 runs",
+      "%.1f%%\n%s proteins  |  %d/83 runs",
       Protein_pct,
       scales::comma(Proteins),
       Runs
@@ -3380,7 +3379,6 @@ nimaa_protein_summary_figure <- ggplot(
     aes(label = Label),
     hjust = -0.08,
     size = 4.2,
-    fontface = "bold",
     colour = "black"
   ) +
   scale_colour_manual(values = software_colors) +
@@ -9165,15 +9163,31 @@ pA <- get_plot("nimaa_precursor_summary_figure")
 pB <- get_plot("nimaa_protein_summary_figure")
 pC <- get_plot("nimaa_nestedness_figure")
 
-# Move existing text labels below the points in A and B
+# Move labels to two lines in panels A and B
 move_labels <- function(p, xpos) {
   for (i in seq_along(p$layers)) {
     if (inherits(p$layers[[i]]$geom, "GeomText")) {
-      p$layers[[i]]$aes_params$x <- xpos
-      p$layers[[i]]$aes_params$hjust <- 0.5
-      p$layers[[i]]$aes_params$vjust <- 0.5
-      p$layers[[i]]$aes_params$size <- 5.5
-      p$layers[[i]]$aes_params$lineheight <- 1.4
+
+      layer <- p$layers[[i]]
+
+      # Convert existing labels into two lines
+      if (!is.null(layer$data) &&
+          "label" %in% names(layer$data)) {
+
+        layer$data$label <- sub(
+          " \\(",
+          "\n(",
+          layer$data$label
+        )
+      }
+
+      layer$aes_params$x <- xpos
+      layer$aes_params$hjust <- 0.5
+      layer$aes_params$vjust <- 0.5
+      layer$aes_params$size <- 4.2
+      layer$aes_params$lineheight <- 1.3
+
+      p$layers[[i]] <- layer
     }
   }
   p
@@ -9181,7 +9195,21 @@ move_labels <- function(p, xpos) {
 
 pA <- move_labels(pA, xpos = 20)
 pB <- move_labels(pB, xpos = 50)
-pC <- pC + coord_cartesian(xlim = c(0, 50)) +
+
+# Panel C: move mean ± SD labels farther right
+for (i in seq_along(pC$layers)) {
+
+  if (inherits(pC$layers[[i]]$geom, "GeomText")) {
+
+    pC$layers[[i]]$mapping$x <- quote(Mean + SD + 2.0)
+
+    pC$layers[[i]]$aes_params$hjust <- 0
+    pC$layers[[i]]$aes_params$vjust <- 0.5
+  }
+}
+
+pC <- pC +
+  coord_cartesian(xlim = c(0, 50)) +
   scale_x_continuous(breaks = seq(0, 50, 10))
 pD <- pD + coord_cartesian(xlim = c(0, 2)) +
   scale_x_continuous(breaks = seq(0, 1, 1.5))
@@ -9224,7 +9252,7 @@ fmt <- function(p) p +
   theme(
     axis.text.x = element_text(size = 14),
     axis.text.y = element_text(size = 15, face = "bold"),
-    axis.title.x = element_text(size = 15),
+    axis.title.x = element_text(size = 15, face = "bold"),
     legend.position = "none",
     plot.margin = margin(10, 16, 10, 10)
   )
@@ -9232,7 +9260,7 @@ fmt <- function(p) p +
 # One-row layout, more width for annotated panels A and B
 fig_nimaa_summary <- wrap_plots(
   fmt(pA), fmt(pB), fmt(pC), fmt(pD),
-  ncol = 4,
+  ncol = 2,
   widths = c(1.5, 1.5, 1.1, 1)
 ) + plot_annotation(tag_levels = "A") &
   theme(plot.tag = element_text(size = 24, face = "bold"))
@@ -9244,7 +9272,7 @@ dir.create(manuscript_dir, recursive = TRUE, showWarnings = FALSE)
 ggsave(
   file.path(manuscript_dir, "Figure_4_NIMAA_Lollipop_Nestedness.png"),
   fig_nimaa_summary,
-  width = 24, height = 5.5, units = "in",
+  width = 12, height = 12, units = "in",
   dpi = 200, bg = "white"
 )
 ```
