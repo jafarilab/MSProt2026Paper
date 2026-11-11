@@ -6008,16 +6008,24 @@ p_upset_identification <- ComplexUpset::upset(
   ),
 
   base_annotations = list(
-    "Protein-group intersections" =
+    "Shared proteins" =
       ComplexUpset::intersection_size(
+        mapping = ggplot2::aes(fill = "Intersection"),
         text = list(
-          size = 3.2,
-          vjust = -0.3
-        )
-      ) +
+          size = 3,
+          angle = 90,
+          hjust = -0.1,
+          vjust = 0.5,
+          color = "black"
+            )
+        ) +
+        ggplot2::scale_fill_manual(
+          values = c("Intersection" = "#D8D2C8"),
+          guide = "none"
+        ) +
       ggplot2::scale_y_continuous(
         labels = scales::comma,
-        expand = ggplot2::expansion(mult = c(0, 0.12))
+        expand = ggplot2::expansion(mult = c(0, 0.18))
       ) +
       ggplot2::theme(
         panel.grid.major.x = ggplot2::element_blank(),
@@ -6030,23 +6038,23 @@ p_upset_identification <- ComplexUpset::upset(
   )
 ) +
   ggplot2::labs(
-    title = "Protein identification across DIA analysis pipelines",
-    subtitle = "Shared and pipeline-specific protein groups across 83 samples",
-    caption = "Exact protein-group identifier matching"
+    title = "Protein identification overlap",
+    # subtitle = "Shared and pipeline-specific protein groups across 83 samples",
+    # caption = "Exact protein-group identifier matching"
   ) +
   ggplot2::theme_minimal(base_size = 12) +
   ggplot2::theme(
     plot.title = ggplot2::element_text(
-      face = "bold", size = 16
+      face = "bold", size = 17
     ),
     plot.subtitle = ggplot2::element_text(
       size = 11, color = "#667085"
     ),
     axis.title = ggplot2::element_text(
-      face = "bold", size = 11
+      face = "bold", size = 13
     ),
     axis.text = ggplot2::element_text(
-      size = 9, color = "#344054"
+      size = 11, color = "#344054"
     ),
     panel.grid.minor = ggplot2::element_blank(),
     plot.background = ggplot2::element_rect(
@@ -6177,16 +6185,24 @@ p_upset_precursors <- ComplexUpset::upset(
   ),
 
   base_annotations = list(
-    "Sequence-charge intersections" =
+    "Shared precursors" =
       ComplexUpset::intersection_size(
+        mapping = ggplot2::aes(fill = "Intersection"),
         text = list(
-          size = 3.2,
-          vjust = -0.3
-        )
-      ) +
+          size = 3,
+          angle = 90,
+          hjust = -0.1,
+          vjust = 0.5,
+          color = "black"
+            )
+        ) +
+        ggplot2::scale_fill_manual(
+          values = c("Intersection" = "#D8D2C8"),
+          guide = "none"
+        ) +
       ggplot2::scale_y_continuous(
         labels = scales::comma,
-        expand = ggplot2::expansion(mult = c(0, 0.12))
+        expand = ggplot2::expansion(mult = c(0, 0.25))
       ) +
       ggplot2::theme(
         panel.grid.major.x = ggplot2::element_blank(),
@@ -6199,17 +6215,17 @@ p_upset_precursors <- ComplexUpset::upset(
   )
 ) +
   ggplot2::labs(
-    title = "Precursor identification across DIA analysis pipelines",
-    subtitle = "Shared and pipeline-specific peptide sequence–charge combinations",
-    caption = paste(
-      "Identifiers harmonized using stripped peptide sequence and charge;",
-      "modified forms with identical sequence and charge are collapsed."
-    )
+    title = "Precursor identification overlap",
+    # subtitle = "Shared and pipeline-specific peptide sequence–charge combinations",
+    # caption = paste(
+    #   "Identifiers harmonized using stripped peptide sequence and charge;",
+    #   "modified forms with identical sequence and charge are collapsed."
+    # )
   ) +
   ggplot2::theme_minimal(base_size = 12) +
   ggplot2::theme(
     plot.title = ggplot2::element_text(
-      face = "bold", size = 16
+      face = "bold", size = 17
     ),
     plot.subtitle = ggplot2::element_text(
       size = 11, color = "#667085"
@@ -6218,10 +6234,10 @@ p_upset_precursors <- ComplexUpset::upset(
       size = 9, color = "#667085"
     ),
     axis.title = ggplot2::element_text(
-      face = "bold", size = 11
+      face = "bold", size = 13
     ),
     axis.text = ggplot2::element_text(
-      size = 9, color = "#344054"
+      size = 11, color = "#344054"
     ),
     panel.grid.minor = ggplot2::element_blank(),
     plot.background = ggplot2::element_rect(
@@ -6338,14 +6354,14 @@ p_precursor_coverage <- ggplot(
     labels = scales::comma
   ) +
   labs(
-    title = "Precursor sequence–charge coverage per protein group",
-    subtitle = "Distinct sequence–charge combinations assigned to each protein-group annotation",
+    title = "Precursor coverage per protein group",
+    #subtitle = "Distinct sequence–charge combinations assigned to each protein-group annotation",
     x = NULL,
-    y = "Sequence–charge combinations per protein group (log10 scale)",
-    caption = paste(
-      "Counts derived from precursor-level protein-group annotations;",
-      "modified forms sharing sequence and charge are collapsed."
-    )
+    y = "Precursors per protein",
+    # caption = paste(
+    #   "Counts derived from precursor-level protein-group annotations;",
+    #   "modified forms sharing sequence and charge are collapsed."
+    # )
   ) +
   theme_minimal(base_size = 12) +
   theme(
@@ -6489,7 +6505,7 @@ p_da_heatmap <- ggplot(
 
   # Do not use coord_equal(): it compresses column widths
   labs(
-    title = "Differential abundance across DIA analysis pipelines",
+    title = "Differential abundance across pipelines",
     subtitle = "Significant protein groups across 11 experimental contrasts",
     x = NULL,
     y = NULL,
@@ -6502,7 +6518,7 @@ p_da_heatmap <- ggplot(
   theme_minimal(base_size = 12) +
   theme(
     plot.title = element_text(
-      face = "bold", size = 17
+      face = "bold", size = 14
     ),
     plot.subtitle = element_text(
       size = 11, color = "#667085"
@@ -6597,36 +6613,49 @@ p_da_upset_6h <- ComplexUpset::upset(
   ),
 
   base_annotations = list(
-    "Significant protein-group intersections" =
-      ComplexUpset::intersection_size(
-        text = list(size = 3.2, vjust = -0.3)
-      ) +
-      ggplot2::scale_y_continuous(
-        labels = scales::comma,
-        expand = ggplot2::expansion(mult = c(0, 0.12))
-      ) +
-      ggplot2::theme(
-        panel.grid.major.x = ggplot2::element_blank(),
-        panel.grid.minor = ggplot2::element_blank()
+  "Shared significant proteins" =
+    ComplexUpset::intersection_size(
+      mapping = ggplot2::aes(fill = "Intersection"),
+      text = list(
+        size = 3,
+        angle = 90,
+        hjust = 0.1,
+        vjust = 0.5,
+        color = "black"
       )
-  ),
+    ) +
+    ggplot2::scale_fill_manual(
+      values = c("Intersection" = "#D8D2C8"),
+      guide = "none"
+    ) +
+    ggplot2::scale_y_continuous(
+      limits = c(0, 1300),
+      breaks = seq(0, 1300, 300),
+      labels = scales::comma,
+      expand = ggplot2::expansion(mult = c(0, 0.25))
+    ) +
+    ggplot2::theme(
+      panel.grid.major.x = ggplot2::element_blank(),
+      panel.grid.minor = ggplot2::element_blank()
+    )
+),
 
   stripes = ComplexUpset::upset_stripes(
     colors = c("white", "#F5F7FA")
   )
 ) +
   ggplot2::labs(
-    title = "Differential abundance overlap across DIA pipelines",
-    subtitle = selected_contrast,
-    caption = paste(
-      "Significant protein groups: BH-adjusted p-value < 0.05;",
-      "exact protein-group identifier matching."
-    )
+    title = "Differential abundance overlap",
+    # subtitle = selected_contrast,
+    # caption = paste(
+    #   "Significant protein groups: BH-adjusted p-value < 0.05;",
+    #   "exact protein-group identifier matching."
+    # )
   ) +
   ggplot2::theme_minimal(base_size = 12) +
   ggplot2::theme(
     plot.title = ggplot2::element_text(
-      face = "bold", size = 16
+      face = "bold", size = 14
     ),
     plot.subtitle = ggplot2::element_text(
       size = 12, color = "#667085"
@@ -7067,15 +7096,15 @@ p_abs_logfc <- ggplot(
     subtitle = "KO vs CTRL cisplatin 6h",
     x = NULL,
     y = "|log2 fold change|",
-    caption = paste(
-      "Finite log2 fold changes only.",
-      "Shared comparison uses exact protein-group identifiers.",
-      "Display truncated at the pooled 99th percentile."
-    )
+    # caption = paste(
+    #   "Finite log2 fold changes only.",
+    #   "Shared comparison uses exact protein-group identifiers.",
+    #   "Display truncated at the pooled 99th percentile."
+    # )
   ) +
   theme_minimal(base_size = 12) +
   theme(
-    plot.title = element_text(face = "bold", size = 16),
+    plot.title = element_text(face = "bold", size = 14),
     plot.subtitle = element_text(color = "#667085"),
     strip.text = element_text(face = "bold", size = 11),
     axis.text.x = element_text(size = 10),
@@ -7221,22 +7250,22 @@ p_precision <- ggplot(
     drop = FALSE
   ) +
   labs(
-    title = "Statistical precision across DIA analysis pipelines",
+    title = "Statistical precision across pipelines",
     subtitle = paste0(
       target_contrast,
       " | Shared protein groups"
     ),
     x = NULL,
     y = NULL,
-    caption = paste(
-      "Only proteins with finite log2FC, positive finite SE,",
-      "and finite t-statistics in all four pipelines.",
-      "Exact protein-group identifier matching."
-    )
+    # caption = paste(
+    #   "Only proteins with finite log2FC, positive finite SE,",
+    #   "and finite t-statistics in all four pipelines.",
+    #   "Exact protein-group identifier matching."
+    # )
   ) +
   theme_minimal(base_size = 12) +
   theme(
-    plot.title = element_text(face = "bold", size = 16),
+    plot.title = element_text(face = "bold", size = 14),
     plot.subtitle = element_text(color = "#667085"),
     strip.text = element_text(face = "bold", size = 11),
     axis.text.x = element_text(size = 10),
@@ -8296,7 +8325,7 @@ p_interaction_agreement <- interaction_overlap_summary |>
     size = 3.5
   ) +
   labs(
-    title = "Cross-pipeline agreement: genotype-dependent cisplatin response",
+    title = "Cross-pipeline agreement:\ngenotype-dependent cisplatin response",
     subtitle = "Proteins tested by all four pipelines; BH-adjusted p < 0.05",
     x = "Number of pipelines detecting a significant interaction",
     y = "Number of proteins"
@@ -8575,6 +8604,13 @@ p_interaction_time_patterns <- interaction_time_pattern_summary |>
   )) +
   geom_col(width = 0.75) +
   scale_fill_brewer(palette = "Set2") +
+  guides(
+  fill = guide_legend(
+    nrow = 2,
+    byrow = TRUE,
+    title = NULL
+  )
+)  +
   labs(
     title = "Time-specific genotype interactions",
     subtitle = paste(
@@ -8583,12 +8619,17 @@ p_interaction_time_patterns <- interaction_time_pattern_summary |>
     ),
     x = NULL,
     y = "Number of proteins",
-    fill = "Individual interaction tests"
+    fill = "Interaction pattern"
   ) +
   theme_bw(base_size = 12) +
   theme(
-    axis.text.x = element_text(angle = 30, hjust = 1),
-    legend.position = "bottom"
+    legend.position = "bottom",
+  legend.justification = "center",
+  legend.text = element_text(size = 10),
+  legend.key.size = grid::unit(0.35, "cm"),
+  legend.spacing.y = grid::unit(0, "cm"),
+  legend.margin = margin(0, 0, 0, 0),
+  plot.margin = margin(3, 3, 3, 3)
   )
 
 print(p_interaction_time_patterns)
@@ -8999,18 +9040,28 @@ export_figure <- function(p, filename, width, height) {
 
 ## Fig 2: Identification and coverage
 ```{r export_figure_2_identification, eval=FALSE}
-p2a <- clean_panel(get_plot("p_precursor_coverage"))
-p2b <- clean_panel(get_plot("p_upset_precursors"))
-p2c <- clean_panel(get_plot("p_upset_identification"))
+library(patchwork)
 
-fig2 <- (p2a | p2b) / p2c +
-  plot_layout(heights = c(1, 1.2)) +
-  plot_annotation(tag_levels = "A")
+p2a <- get_plot("p_precursor_coverage")
+p2b <- get_plot("p_upset_precursors")
+p2c <- get_plot("p_upset_identification")
 
-export_figure(fig2, "Figure_2_Identification", 13, 10)
+
+fig2 <- (
+  wrap_elements(full = p2a) /
+  wrap_elements(full = p2b) /
+  wrap_elements(full = p2c)
+) +
+  plot_layout(heights = c(1.5, 1.5, 1.5)) +
+  plot_annotation(tag_levels = "A") &
+  theme(
+    plot.tag = element_text(size = 22, face = "bold")
+  )
+
+export_figure(fig2, "Figure_2_Identification", 10, 9)
 print(fig2)
 ```
-
+**Figure 2. Precursor coverage and identification overlap across four DIA proteomics analysis pipelines.** (A) Distribution of unique peptide sequence–charge combinations per protein group identified by AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Boxplots show the median, interquartile range, and whiskers, with counts displayed on a logarithmic (log10) scale. (B) UpSet plot showing shared and pipeline-specific precursor identifications. Intersection bars indicate the number of unique peptide sequence–charge combinations identified by each pipeline combination, while horizontal bars represent the total number identified by each pipeline. Precursors were harmonized using stripped peptide sequence and charge state; modified forms sharing the same sequence and charge were collapsed into a single identifier. (C) UpSet plot showing shared and pipeline-specific protein-group identifications, using exact protein-group identifier matching. Intersection bars indicate the number of protein groups associated with each pipeline combination, and horizontal bars show the total number identified by each pipeline. Filled dots and connecting lines indicate the pipelines contributing to each intersection. All analyses were based on the same 83-sample dataset.
 
 ## Fig 3: NIMAA completeness
 
@@ -9129,7 +9180,10 @@ move_labels <- function(p, xpos) {
 
 pA <- move_labels(pA, xpos = 20)
 pB <- move_labels(pB, xpos = 50)
-
+pC <- pC + coord_cartesian(xlim = c(0, 50)) +
+  scale_x_continuous(breaks = seq(0, 50, 10))
+pD <- pD + coord_cartesian(xlim = c(0, 2)) +
+  scale_x_continuous(breaks = seq(0, 1, 1.5))
 # Reduce x-axis ticks without changing data limits
 # A and B use percentages on a 0–100 scale
 pA <- pA + scale_x_continuous(
@@ -9179,7 +9233,8 @@ fig_nimaa_summary <- wrap_plots(
   fmt(pA), fmt(pB), fmt(pC), fmt(pD),
   ncol = 4,
   widths = c(1.5, 1.5, 1.1, 1)
-) + plot_annotation(tag_levels = "A")
+) + plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(size = 24, face = "bold"))
 
 # Save PNG only
 manuscript_dir <- file.path(cache_dir, "manuscript_figures")
@@ -9204,50 +9259,112 @@ p5c <- clean_panel(get_plot("p_sigma"))
 p5d <- clean_panel(get_plot("p_abundance_precision"))
 
 fig5 <- (p5a | p5b) / (p5c | p5d) +
-  plot_annotation(tag_levels = "A")
+  plot_annotation(tag_levels = "A")&
+  theme(
+    plot.tag = element_text(size = 22, face = "bold")
+  )
 
 export_figure(fig5, "Figure_5_Reproducibility_Precision", 14, 10)
 print(fig5)
 ```
+**Figure 5. Comparison of sample-level reproducibility and quantitative precision across four DIA proteomics analysis pipelines.** (A) Multidimensional scaling (MDS) plots showing the distribution of 83 samples processed with AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, colored by experimental condition. (B) MDS plots of the same samples colored by acquisition batch, illustrating batch-associated clustering patterns across pipelines. (C) Distribution of protein-level residual standard deviations (σ) across pipelines, displayed on a logarithmic (log10) scale. Violin plots represent the distribution of residual variability, with embedded boxplots showing the median and interquartile range. Lower residual standard deviations indicate greater quantitative precision. (D) Median protein-level residual standard deviation across ten protein abundance deciles, calculated from log2-transformed protein abundances. Deciles are ordered from lowest (1) to highest (10) protein abundance. Lower values indicate greater quantitative precision. Together, these analyses characterize sample clustering, batch-associated variation, and abundance-dependent quantitative precision across the four DIA analysis pipelines.
+
 
 ## Fig 6: Differential abundance
 ```{r export_figure_5_da, eval=FALSE}
-p6a <- clean_panel(get_plot("p_da_heatmap"))
-p6b <- clean_panel(get_plot("p_da_upset_6h"))
-p6c <- clean_panel(get_plot("p_abs_logfc"))
-p6d <- clean_panel(get_plot("p_precision"))
+library(ggplot2)
+library(patchwork)
 
-fig6 <- (p6a | p6b) / (p6c | p6d) +
-  plot_annotation(tag_levels = "A")
+p6a <- get_plot("p_da_heatmap")
+p6b <- get_plot("p_da_upset_6h")
+p6c <- get_plot("p_abs_logfc")
+# p6d <- get_plot("p_precision")
 
-export_figure(fig6, "Figure_6_Differential_Abundance", 15, 11)
+# Improve violin plot readability
+violin_theme <- theme(
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title = element_text(size = 14),
+  strip.text = element_text(size = 13, face = "bold")
+)
+
+p6c <- p6c + violin_theme
+p6d <- p6d + violin_theme
+
+# Treat each plot, including the UpSet, as one tagged panel
+tag_panel <- function(p, letter) {
+  wrap_elements(full = p) +
+    labs(tag = letter) +
+    theme(
+      plot.tag = element_text(size = 22, face = "bold"),
+      plot.tag.position = c(0, 1),
+      plot.margin = margin(8, 8, 8, 8)
+    )
+}
+
+# Independent rows prevent heatmap margins affecting violins
+top <- tag_panel(p6a, "A") | tag_panel(p6b, "B")
+bottom <- tag_panel(p6c, "C") | tag_panel(p_precision, "D")
+
+fig6 <- wrap_elements(full = top) /
+  wrap_elements(full = bottom) +
+  plot_layout(heights = c(1, 0.9))
+
+export_figure(
+  fig6,
+  "Figure_6_Differential_Abundance",
+  14, 8
+)
+
 print(fig6)
 ```
-
+**Figure 6. Differential protein abundance, cross-pipeline agreement, and statistical precision across four DIA proteomics analysis pipelines.** (A) Heatmap showing the number of significantly differentially abundant protein groups identified by AlphaDIA, DIA-NN, Spectronaut, and MaxDIA across 11 experimental contrasts. Cell values indicate the number of significant protein groups, with darker blue representing higher counts. Significance was defined using the Benjamini–Hochberg-adjusted p-value (FDR < 0.05), with statistical models adjusted for acquisition batch. (B) UpSet plot showing the overlap of significantly differentially abundant protein groups for the knockout (KO) versus control (CTRL) comparison following 6 h of cisplatin treatment. Protein groups were matched across pipelines using exact protein-group identifiers. Vertical bars represent the numbers of protein groups in each exclusive intersection, horizontal bars indicate the total number of significant protein groups per pipeline, and connected filled dots identify the contributing pipelines. A total of 557 protein groups were significant in all four pipelines, while 1,210 additional protein groups were shared by AlphaDIA, DIA-NN, and Spectronaut but not MaxDIA. Of the 647 significant protein groups identified by MaxDIA, 86.1% were also significant in all three other pipelines. (C) Distributions of absolute protein log2 fold changes for the same KO versus CTRL cisplatin 6 h contrast, shown separately for all testable proteins and protein groups shared by all four pipelines. (D) Distributions of contrast-specific standard errors and absolute t-statistics for the same contrast, restricted to shared protein groups with finite log2 fold changes, positive finite standard errors, and finite t-statistics across all four pipelines. In panels C and D, violin plots show the distributions, with embedded boxplots indicating the median and interquartile range.
 
 ## Fig 7: Fold-change agreement
 ```{r export_figure_6_logfc, eval=FALSE}
 fig7 <- get_plot("p_logfc_agreement_6h") +
-  labs(title = NULL, subtitle = NULL, caption = NULL)
+  labs(title = NULL, caption = NULL)
 
-export_figure(fig7, "Figure_7_FoldChange_Agreement", 12, 9)
+export_figure(fig7, "Figure_7_FoldChange_Agreement", 7, 7)
 print(fig7)
 ```
 
+**Figure 7. Pairwise agreement in protein log2 fold changes across four DIA proteomics analysis pipelines.** Scatterplots compare protein-level log2 fold-change estimates between AlphaDIA, DIA-NN, Spectronaut, and MaxDIA for all six pairwise pipeline combinations. Each point represents a protein group with fold-change estimates available from both pipelines. The x- and y-axes represent the log2 fold changes estimated by the first and second pipelines named in each panel, respectively. Orange dashed lines indicate the line of identity (y = x), representing perfect agreement between pipelines. Points closer to this line indicate greater concordance in estimated fold-change magnitude and direction, whereas deviations reflect differences in quantitative effect-size estimates. Comparisons illustrate the consistency and variability of protein-level differential abundance estimates across DIA analysis pipelines.
+
 ## Fig 8: Temporal interactions
 ```{r export_figure_7_temporal, eval=FALSE}
-p8a <- clean_panel(get_plot("p_interaction_agreement"))
-p8b <- clean_panel(get_plot("p_interaction_time_patterns"))
-p8c <- clean_panel(get_plot("p_interaction_effects"))
+p8a <- p_interaction_agreement
+p8b <- p_interaction_time_patterns
+p8c <- get_plot("p_interaction_effects")
+
+p8a <- p8a + labs(
+  title = "Cross-pipeline interaction agreement",
+  subtitle = NULL,
+  x = "Pipelines detecting significant interaction"
+)
+
+p8b <- p8b + labs(
+  title = "Time-specific interactions",
+  subtitle = NULL
+)
+
+p8c <- p8c + labs(
+  title = "Genotype-interaction effect sizes",
+  subtitle = NULL
+)
 
 fig8 <- (p8a | p8b) / p8c +
   plot_layout(heights = c(1, 1.3)) +
   plot_annotation(tag_levels = "A")
+fig8 <- fig8 &
+  theme(
+    plot.tag = element_text(size = 22, face = "bold")
+  )
 
-export_figure(fig8, "Figure_8_Temporal_Interactions", 13, 10)
+export_figure(fig8, "Figure_8_Temporal_Interactions", 10, 8)
 print(fig8)
 ```
-
+**Figure 8. Cross-pipeline agreement and temporal patterns of genotype-dependent cisplatin responses across four DIA proteomics analysis pipelines.** (A) Distribution of protein groups according to the number of pipelines detecting a statistically significant genotype-by-treatment interaction. The analysis was restricted to proteins tested by all four pipelines (AlphaDIA, DIA-NN, Spectronaut, and MaxDIA), with significance defined using Benjamini–Hochberg-adjusted p-values < 0.05. Among these proteins, 4,173 showed no significant interaction in any pipeline, whereas 1,428, 864, 758, and 243 were significant in one, two, three, or all four pipelines, respectively. (B) Temporal classification of the 243 protein groups with significant joint interaction tests in all four pipelines, based on the significance of individual interaction tests at 6 and 24 h. Stacked bars indicate the number of proteins significant at 6 h only, 24 h only, both time points, or neither time point individually. (C) Genotype-dependent cisplatin response effect sizes for the same 243 protein groups at 24 h (left) and 6 h (right), expressed as knockout (KO) minus control (CTRL) responses on the log2 scale. Each point represents a protein-group effect estimate from one DIA pipeline, and gray lines connect corresponding protein groups across pipelines. The horizontal dashed line indicates zero interaction effect. Positive and negative values represent opposite directions of genotype-dependent treatment response. Together, these analyses assess the reproducibility of genotype-dependent cisplatin responses, their temporal specificity, and the agreement of interaction effect estimates across DIA analysis pipelines.
 
 
 
