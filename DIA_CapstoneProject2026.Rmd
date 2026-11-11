@@ -9063,6 +9063,7 @@ print(fig2)
 ```
 **Figure 2. Precursor coverage and identification overlap across four DIA proteomics analysis pipelines.** (A) Distribution of unique peptide sequence–charge combinations per protein group identified by AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Boxplots show the median, interquartile range, and whiskers, with counts displayed on a logarithmic (log10) scale. (B) UpSet plot showing shared and pipeline-specific precursor identifications. Intersection bars indicate the number of unique peptide sequence–charge combinations identified by each pipeline combination, while horizontal bars represent the total number identified by each pipeline. Precursors were harmonized using stripped peptide sequence and charge state; modified forms sharing the same sequence and charge were collapsed into a single identifier. (C) UpSet plot showing shared and pipeline-specific protein-group identifications, using exact protein-group identifier matching. Intersection bars indicate the number of protein groups associated with each pipeline combination, and horizontal bars show the total number identified by each pipeline. Filled dots and connecting lines indicate the pipelines contributing to each intersection. All analyses were based on the same 83-sample dataset.
 
+
 ## Fig 3: NIMAA completeness
 
 ```{r export_figure3_nimaa_fixed, eval=FALSE, message=FALSE, fig.show='hide'}
