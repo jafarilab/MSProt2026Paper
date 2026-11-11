@@ -117,7 +117,7 @@ Define the input files for each software package and the output directory for th
 # ***************************************
 # ******** localRepo = c("Mohi", "Peyman") ***************
 
-localRepo <- "Peyman"
+localRepo <- "Mohi"
 
 # ***************************************************
 
