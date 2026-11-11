@@ -1333,7 +1333,7 @@ for (software in software_names) {
     rd, cd, keep, keep_detection,
     keep_ids, keep_quality,
     keep_proteotypic, proteotypic_unknown,
-    conditions, groups
+    conditions
   )
 
   gc(verbose = FALSE)
@@ -1344,7 +1344,7 @@ for (software in software_names) {
 # ============================================================
 
 filter_summary <- dplyr::bind_rows(filter_summary)
-
+print(as.tibble(lapply(groups, length)),width = Inf)
 print(tibble::as_tibble(filter_summary), width = Inf)
 ```
 Precursor-level filtering was performed independently for AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Precursors were retained if they had positive, non-missing intensities in at least two-thirds of the samples within any one experimental condition, preserving condition-specific signals. Annotated decoys, reverse hits, and potential contaminants were excluded. Proteotypic filtering was applied using DIA-NN's explicit annotation and a single-protein-identifier criterion for MaxDIA; however, proteotypic status could not be reliably verified for AlphaDIA and Spectronaut, so these precursors were retained pending further assessment. No minimum peptide count per protein was imposed. Following filtering, AlphaDIA retained 62.5%, DIA-NN 67.8%, Spectronaut 90.8%, and MaxDIA 63.6% of their initial precursors. Spectronaut's higher retention reflects its nearly complete quantitative matrix, whereas detection-frequency filtering had a greater impact on the other pipelines. Differences in software-specific quantification and proteotypic annotations should therefore be considered when interpreting precursor coverage.
