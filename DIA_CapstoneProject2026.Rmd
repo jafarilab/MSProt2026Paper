@@ -4297,7 +4297,7 @@ p_mds_condition <- ggplot2::ggplot(
 ) +
   ggplot2::geom_point(
     size = 2.5,
-    alpha = 0.85
+    alpha = 0.35
   ) +
   ggplot2::facet_wrap(
     ~ Software,
@@ -4333,7 +4333,7 @@ p_mds_batch <- ggplot2::ggplot(
 ) +
   ggplot2::geom_point(
     size = 2.5,
-    alpha = 0.85
+    alpha = 0.35
   ) +
   ggplot2::facet_wrap(
     ~ Software,
@@ -7342,7 +7342,7 @@ p_sigma <- ggplot(
       " matched protein groups with valid residual sigma"
     ),
     x = NULL,
-    y = "Residual standard deviation, sigma (log10 scale)",
+    y = "Residual standard deviation,\n sigma (log10 scale)",
     caption = paste(
       "Existing batch-adjusted msqrob2 models.",
       "Identical protein groups compared across all four pipelines."
@@ -8442,7 +8442,7 @@ p_interaction_effects <- interaction_effects |>
     title = "Genotype-interaction effect sizes across DIA pipelines",
     subtitle = "243 proteins with significant joint interactions in all four pipelines",
     x = NULL,
-    y = "KO response minus CTRL response (log2 scale)"
+    y = "KO response minus CTRL response\n(log2 scale)"
   ) +
   theme_bw(base_size = 12) +
   theme(
@@ -8811,7 +8811,7 @@ p_abundance_precision <- ggplot(
       "shared proteins; abundance deciles defined within each pipeline"
     ),
     x = "Protein abundance decile (low to high)",
-    y = "Median model residual SD (log2 scale)",
+    y = "Median model residual SD\n (log2 scale)",
     color = "DIA pipeline"
   ) +
   theme_bw(base_size = 12)
@@ -9271,7 +9271,15 @@ ggsave(
 p5a <- clean_panel(get_plot("p_mds_condition"))
 p5b <- clean_panel(get_plot("p_mds_batch"))
 p5c <- clean_panel(get_plot("p_sigma"))
-p5d <- clean_panel(get_plot("p_abundance_precision"))
+p5d <- clean_panel(get_plot("p_abundance_precision")) +
+  labs(y = "Median model residual SD\n(log2 scale)") +
+  theme(
+    axis.title.y = element_text(
+      size = 12,
+      color = "black",
+      margin = margin(r = 10)
+    )
+  )
 
 fig5 <- (p5a | p5b) / (p5c | p5d) +
   plot_annotation(tag_levels = "A")&
@@ -9279,7 +9287,7 @@ fig5 <- (p5a | p5b) / (p5c | p5d) +
     plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(fig5, "Figure_5_Reproducibility_Precision", 14, 10)
+export_figure(fig5, "Figure_5_Reproducibility_Precision", 10, 6)
 print(fig5)
 ```
 **Figure 5. Comparison of sample-level reproducibility and quantitative precision across four DIA proteomics analysis pipelines.** (A) Multidimensional scaling (MDS) plots showing the distribution of 83 samples processed with AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, colored by experimental condition. (B) MDS plots of the same samples colored by acquisition batch, illustrating batch-associated clustering patterns across pipelines. (C) Distribution of protein-level residual standard deviations (σ) across pipelines, displayed on a logarithmic (log10) scale. Violin plots represent the distribution of residual variability, with embedded boxplots showing the median and interquartile range. Lower residual standard deviations indicate greater quantitative precision. (D) Median protein-level residual standard deviation across ten protein abundance deciles, calculated from log2-transformed protein abundances. Deciles are ordered from lowest (1) to highest (10) protein abundance. Lower values indicate greater quantitative precision. Together, these analyses characterize sample clustering, batch-associated variation, and abundance-dependent quantitative precision across the four DIA analysis pipelines.
@@ -9350,12 +9358,20 @@ print(fig7)
 ```{r export_figure_7_temporal, eval=FALSE}
 p8a <- p_interaction_agreement
 p8b <- p_interaction_time_patterns
-p8c <- get_plot("p_interaction_effects")
+p8c <- get_plot("p_interaction_effects")+
+  labs(y = "KO response minus CTRL response\n(log2 scale)") +
+  theme(
+    axis.title.y = element_text(
+      size = 12,
+      color = "black",
+      margin = margin(r = 10)
+    )
+  )
 
 p8a <- p8a + labs(
-  title = "Cross-pipeline interaction agreement",
+  title = "Cross-pipeline interaction\nagreement",
   subtitle = NULL,
-  x = "Pipelines detecting significant interaction"
+  x = "Pipelines detecting significant\ninteraction"
 )
 
 p8b <- p8b + labs(
@@ -9376,7 +9392,7 @@ fig8 <- fig8 &
     plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(fig8, "Figure_8_Temporal_Interactions", 10, 8)
+export_figure(fig8, "Figure_8_Temporal_Interactions", 7, 8)
 print(fig8)
 ```
 **Figure 8. Cross-pipeline agreement and temporal patterns of genotype-dependent cisplatin responses across four DIA proteomics analysis pipelines.** (A) Distribution of protein groups according to the number of pipelines detecting a statistically significant genotype-by-treatment interaction. The analysis was restricted to proteins tested by all four pipelines (AlphaDIA, DIA-NN, Spectronaut, and MaxDIA), with significance defined using Benjamini–Hochberg-adjusted p-values < 0.05. Among these proteins, 4,173 showed no significant interaction in any pipeline, whereas 1,428, 864, 758, and 243 were significant in one, two, three, or all four pipelines, respectively. (B) Temporal classification of the 243 protein groups with significant joint interaction tests in all four pipelines, based on the significance of individual interaction tests at 6 and 24 h. Stacked bars indicate the number of proteins significant at 6 h only, 24 h only, both time points, or neither time point individually. (C) Genotype-dependent cisplatin response effect sizes for the same 243 protein groups at 24 h (left) and 6 h (right), expressed as knockout (KO) minus control (CTRL) responses on the log2 scale. Each point represents a protein-group effect estimate from one DIA pipeline, and gray lines connect corresponding protein groups across pipelines. The horizontal dashed line indicates zero interaction effect. Positive and negative values represent opposite directions of genotype-dependent treatment response. Together, these analyses assess the reproducibility of genotype-dependent cisplatin responses, their temporal specificity, and the agreement of interaction effect estimates across DIA analysis pipelines.
