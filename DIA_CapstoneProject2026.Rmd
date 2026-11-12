@@ -14,7 +14,7 @@ output:
 geometry: margin=0.85in
 fontsize: 10pt
 ---
-
+# Setup
 ```{r setup, include=FALSE}
 # FALSE = knit report from existing cached results
 # TRUE  = allow computationally expensive analysis chunks
@@ -27,14 +27,6 @@ knitr::opts_chunk$set(
   fig.align = "center",
   out.width = "100%"
 )
-
-library(tidyverse)
-library(QFeatures)
-library(SummarizedExperiment)
-
-cache_dir <- "/Users/nvd448/Documents/MSProt2026/R_cache"
-
-stopifnot(dir.exists(cache_dir))
 ```
 
 # Resources
@@ -45,6 +37,7 @@ stopifnot(dir.exists(cache_dir))
 # ============================================================
 packages <- c(
   "data.table",
+  "scales",
   "tidyverse",
   "SummarizedExperiment",
   "QFeatures",
@@ -124,7 +117,7 @@ Define the input files for each software package and the output directory for th
 # ***************************************
 # ******** localRepo = c("Mohi", "Peyman") ***************
 
-localRepo <- "Mohi"
+localRepo <- "Peyman"
 
 # ***************************************************
 
@@ -968,7 +961,9 @@ for (software in software_names) {
   rm(qf_combined)
   gc(verbose = FALSE)
 }
+
 message("\nAll four combined QFeatures objects are ready.")
+
 ```
 
 
@@ -980,7 +975,7 @@ The four saved QFeatures objects are reloaded individually to summarize their di
 # Inspect one software at a time
 # ============================================================
 
-rm(list = setdiff(ls(), c("cache_dir", "software_names", "combined_qf_files")))
+rm(list = setdiff(ls(), c("cache_dir", "software_names", "combined_qf_files",)))
 invisible(gc(verbose = FALSE))
 
 
@@ -1057,6 +1052,8 @@ combined_summary <- dplyr::bind_rows(combined_summary)
 
 print(tibble::as_tibble(combined_summary), width = Inf)
 
+#print(as.tibble(make_sample_annotation(qf$runCol)), width = Inf)
+
 ```
 
 
@@ -1075,11 +1072,13 @@ print(tibble::as_tibble(combined_summary), width = Inf)
 # Proteotypic status cannot yet be verified for AlphaDIA
 # and Spectronaut using their current combined rowData.
 # ============================================================
-rm(list = setdiff(ls(), c("cache_dir", "software_names", "combined_qf_files")))
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
 invisible(gc(verbose = FALSE))
 
-
-filtered_qf_files <- gsub('_combined.rds', '_filtered_final.rds', combined_qf_files)
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
 
 filter_summary <- list()
 
@@ -1395,8 +1394,14 @@ ggplot2::ggplot(
 # Log2 transformation of filtered precursor intensities
 # Update existing filtered QFeatures files and R objects
 # ============================================================
-rm(list = setdiff(ls(), c("cache_dir", "software_names", "filtered_qf_files")))
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
 invisible(gc(verbose = FALSE))
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
+
 
 for (software in software_names) {
 
@@ -1446,6 +1451,7 @@ for (software in software_names) {
 ```
 Following precursor-level filtering, intensity values were log2-transformed using the `logTransform()` function from the QFeatures package to reduce right-skewness and improve comparability of quantitative measurements. The transformed intensities were stored in a new assay named precursors_log, while the original filtered intensities were preserved in precursors. Both assays were retained within each software-specific QFeatures object (`qf_alpha`, `qf_diann`, `qf_spectro`, and `qf_maxdia`), maintaining their metadata and processing relationships for subsequent analysis.
 
+## 8. Density distributions
 
 ```{r precursor_density_before_normalization, eval=FALSE, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
 
@@ -1453,6 +1459,7 @@ Following precursor-level filtering, intensity values were log2-transformed usin
 # Log2 precursor intensity distributions before normalization
 # 84 runs per software, displayed as overlaid histograms
 # ============================================================
+<<<<<<< HEAD
 # rm(list = setdiff(ls(), c("cache_dir", "software_names", "filtered_qf_files")))
 invisible(gc(verbose = FALSE))
 
@@ -1472,35 +1479,72 @@ file_keys <- c(
   "MaxDIA"      = "MaxDIA"
 )
 for (software in names(qf_list)) {
+=======
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-  cat("\nLoading and extraxting precursors_log", software, "...\n", sep = "")
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
+
+density_data <- list()
+
+for (software in software_names) {
+>>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
+
+  cat("\nCalculating densities for ", software, "...\n", sep = "")
+  
   # Load existing filtered QFeatures
+<<<<<<< HEAD
   qf_one <- readRDS(filtered_qf_files[[file_keys[[software]]]])
   se <- qf_one[["precursors_log"]]
+=======
+  qf_one <- readRDS(filtered_qf_files[[software]])
+  
+  se <- qf_one[["precursors_log"]]
+  x <- SummarizedExperiment::assay(se, withDimnames = FALSE)
+>>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
 
-  # Sample up to 5,000 nonmissing intensities per run
-  run_data <- lapply(seq_len(ncol(se)), function(j) {
+  # Calculate density separately for each run
+  run_densities <- lapply(seq_len(ncol(x)), function(j) {
 
-    values <- assay(se)[, j]
+    values <- x[, j]
     values <- values[is.finite(values)]
 
-    if (length(values) > 5000) {
-      values <- sample(values, 5000)
+    if (length(values) < 2L ||
+        min(values) == max(values)) {
+      return(NULL)
     }
-
+    
+    den <- stats::density(
+      values,
+      n = 512L,
+      na.rm = TRUE
+    )
+  
     data.frame(
-      Software = rep(software, length(values)),
+      Software = software,
       Run = colnames(se)[j],
-      Log2_Intensity = values
+      Log2_Intensity = den$x,
+      Density = den$y
     )
   })
+  
+    density_data[[software]] <- dplyr::bind_rows(run_densities)
 
-  hist_data[[software]] <- dplyr::bind_rows(run_data)
+    cat(software, ": ", ncol(se), " runs; ",
+        nrow(density_data[[software]]), " density coordinates\n", sep = "")
+    
+    rm(qf_one, se, x, run_densities)
+    invisible(gc(verbose = FALSE))
 }
 
-hist_data <- dplyr::bind_rows(hist_data)
+density_data <- dplyr::bind_rows(density_data) %>%
+  mutate(Software = factor(Software, levels = software_names))
 
 # Plot all 84 run distributions for each software
+<<<<<<< HEAD
 p_hist_all <- ggplot2::ggplot(
   hist_data,
   ggplot2::aes(
@@ -1517,17 +1561,19 @@ p_hist_all <- ggplot2::ggplot(
     linewidth = 0.25,
     alpha = 0.3
   ) +
+=======
+ggplot2::ggplot(density_data,
+  ggplot2::aes(x = Log2_Intensity, y = Density, color = Software,
+               group = interaction(Software, Run))) +
+  ggplot2::geom_line(
+    linewidth = 0.35, alpha = 0.3, show.legend = FALSE) +
+>>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
   ggplot2::facet_wrap(
-    ~ Software,
-    scales = "free_x",
-    ncol = 2
-  ) +
+    ~ Software, scales = "free_y", ncol = 2) +
   ggplot2::labs(
     title = "Pre-normalization precursor intensity distributions",
-    subtitle = "84 LC-MS runs per software; sampled log2 intensities",
-    x = "Log2 precursor intensity",
-    y = "Density"
-  ) +
+    subtitle = "84 LC-MS runs per software; all finite log2 intensities",
+    x = "Log2 precursor intensity", y = "Density") +
   ggplot2::theme_classic(base_size = 12) +
   ggplot2::theme(
     strip.text = ggplot2::element_text(face = "bold"),
@@ -1535,46 +1581,52 @@ p_hist_all <- ggplot2::ggplot(
   )
 ```
 
-
+## 9. Hist distributions 
 
 ```{r precursor_density_before_normalization_extra, eval=FALSE, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
-
 # ============================================================
 # Pre-normalization log2 precursor intensity distributions
 # One density curve per software, pooling all 84 runs
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  `DIA-NN` = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
 )
 
-set.seed(123)
+hist_data <- list()
 
-density_data <- lapply(names(qf_object_names), function(software) {
+for (software in software_names) {
 
-  qf_one <- get(qf_object_names[[software]])
-  x <- assay(qf_one[["precursors_log"]])
+  cat("\nProcessing ", software, "...\n", sep = "")
 
-  # Sample up to 100,000 finite values per software
-  # to avoid storing millions of observations for plotting
-  values <- as.vector(x)
-  values <- values[is.finite(values)]
+  qf_one <- readRDS(filtered_qf_files[[software]])
+  se <- qf_one[["precursors_log"]]
 
-  if (length(values) > 100000) {
-    values <- sample(values, 100000)
+  x <- SummarizedExperiment::assay(se, withDimnames = FALSE)
+
+  # ----------------------------------------------------------
+  # Determine common bin boundaries for all 84 runs
+  # ----------------------------------------------------------
+  value_range <- c(Inf, -Inf)
+  for (j in seq_len(ncol(se))) {
+    values <- x[, j]
+    values <- values[is.finite(values)]
+    if (!length(values)) next
+    value_range[1] <- min(value_range[1], min(values))
+    value_range[2] <- max(value_range[2], max(values))
   }
 
-  data.frame(
-    Software = software,
-    Log2_Intensity = values
+  stopifnot(
+    all(is.finite(value_range)),
+    diff(value_range) > 0
   )
-})
 
-density_data <- dplyr::bind_rows(density_data)
+  breaks <- seq(value_range[1], value_range[2], length.out = 70 + 1L)
 
+<<<<<<< HEAD
 p_hist_all_onePlot <- ggplot2::ggplot(
   density_data,
   ggplot2::aes(
@@ -1603,31 +1655,92 @@ p_hist_all_onePlot <- ggplot2::ggplot(
     color = "Software",
     fill = "Software"
   ) +
+=======
+  # ----------------------------------------------------------
+  # Count ALL precursor intensities in each bin
+  # ----------------------------------------------------------
+  run_hist <- lapply(seq_len(ncol(se)), function(j) {
+    values <- x[, j]
+    values <- values[is.finite(values)]
+    if (!length(values)) return(NULL)
+    h <- hist(values, breaks = breaks, plot = FALSE,
+              right = FALSE, include.lowest = TRUE)
+
+    # Confirm every finite intensity was counted
+    stopifnot(sum(h$counts) == length(values))
+
+    data.frame(Software = software, Run = colnames(se)[j],
+               BinStart = h$breaks, Count = c(h$counts, 0))
+  })
+
+  hist_data[[software]] <- dplyr::bind_rows(run_hist)
+
+  cat(software, ": ", ncol(se), " runs processed using all finite intensities\n", sep = "")
+
+  rm(qf_one, se, x, run_hist)
+  invisible(gc(verbose = FALSE))
+}
+
+hist_data <- dplyr::bind_rows(hist_data) %>%
+  mutate(Software = factor(Software, levels = software_names))
+# Plot all 84 run distributions for each software
+ggplot2::ggplot(hist_data,
+                ggplot2::aes(x = BinStart, y = Count, color = Software,
+                             group = Software)) +
+  ggplot2::geom_step(direction = "hv", linewidth = 0.35, alpha = 0.3, show.legend = FALSE) +
+  ggplot2::facet_wrap(~Software, scales = "free", ncol = 2) +
+  ggplot2::labs(title = "Pre-normalization precursor intensity distributions",
+                subtitle = paste0("84 LC-MS runs per software; exact histogram counts ",
+                                  "from all finite precursor intensities"),
+                x = "Log2 precursor intensity", y = "Number of precursors") +
+>>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
   ggplot2::theme_classic(base_size = 12) +
   ggplot2::theme(
-    plot.title = ggplot2::element_text(face = "bold"),
-    legend.position = "top",
-    legend.title = ggplot2::element_blank()
+    strip.text = ggplot2::element_text(face = "bold"),
+    plot.title = ggplot2::element_text(face = "bold")
   )
+<<<<<<< HEAD
 
 #rm(density_data)
+=======
+>>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
 ```
 Unlike the other three software packages, Spectronaut has a distinctly multimodal intensity distribution, including a sharp peak near log2 intensity = 0 and a broader low-intensity population between approximately 2 and 7. This is particularly suspicious because almost every Spectronaut precursor has a reported intensity in all 84 runs, despite IsImputed = False throughout.
-### Extra filtering step
+
+## 10. Extra filtering step
+
 ```{r spectronaut_intensity_floor_correction, message=FALSE, eval=run_analysis}
 # Replace Spectronaut raw intensity = 1 with NA
 # and reapply condition-aware precursor filtering
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
+
+qf_spectro <- readRDS(filtered_qf_files[["Spectronaut"]])
 
 se_raw <- qf_spectro[["precursors"]]
 se_log <- qf_spectro[["precursors_log"]]
 
-raw <- assay(se_raw)
-log_x <- assay(se_log)
+raw <- assay(se_raw, withDimnames = FALSE)
+log_x <- assay(se_log, withDimnames = FALSE)
+
+stopifnot(
+  identical(dim(raw), dim(log_x)),
+  identical(is.na(raw), is.na(log_x))
+)
+
+n_before <- nrow(se_raw)
 
 # Identify suspected floor values
 floor_mask <- !is.na(raw) & raw == 1
-
 n_floor <- sum(floor_mask)
+
+cat("Spectronaut floor values (raw intensity = 1): ",
+    format(n_floor, big.mark = ","), "\n", sep = "")
 
 # Replace corresponding values in both assays
 raw[floor_mask] <- NA_real_
@@ -1640,15 +1753,13 @@ qf_spectro[["precursors"]] <- se_raw
 qf_spectro[["precursors_log"]] <- se_log
 
 # Reapply the 2/3 detection criterion within ANY condition
-conditions <- as.character(
-  colData(qf_spectro[["precursors"]])$condition
-)
+conditions <- as.character(colData(se_raw)$condition)
 
-stopifnot(!anyNA(conditions))
+stopifnot(!anyNA(conditions), length(conditions) == ncol(se_raw))
 
 groups <- split(seq_along(conditions), conditions)
 
-keep <- rep(FALSE, nrow(qf_spectro[["precursors"]]))
+keep <- rep(FALSE, nrow(se_raw))
 
 for (idx in groups) {
   min_obs <- ceiling(length(idx) * 2 / 3)
@@ -1660,8 +1771,6 @@ for (idx in groups) {
 
   keep <- keep | (observed >= min_obs)
 }
-
-n_before <- nrow(qf_spectro[["precursors"]])
 
 # Filter both assays together
 qf_spectro <- qf_spectro[keep, , ]
@@ -1700,35 +1809,32 @@ gc(verbose = FALSE)
 ```
 Run chunk 23 to re-visualize the distribution after extra filtering.
 
-## Normalization
+## 11. Normalization
 Systematic technical variation between LC-MS runs can introduce differences in measured precursor intensities that are unrelated to biological conditions. Pre-normalization QC revealed batch-associated intensity shifts across the four DIA analysis pipelines. To account for run-level differences, the Median of Ratios method was applied independently to each software's log2-transformed precursor intensities. Normalization factors were calculated using `nfLogMedianOfRatios()` and subtracted from each corresponding run using `sweep()`. The normalized intensities were stored in a new assay named `precursors_norm`, preserving the original precursors and `precursors_log` assays.
 
 ```{r normalize_precursors, message=FALSE, eval=run_analysis}
 # ============================================================
 # Median of Ratios normalization for four DIA software tools
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  DIANN = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
 )
+
 
 normalization_summary <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
-  message("Normalizing ", software, "...")
+  cat("\nNormalizing ", software, "...\n", sep = "")
 
-  object_name <- qf_object_names[[software]]
-  qf_one <- get(object_name, envir = .GlobalEnv)
+  qf_one <- readRDS(filtered_qf_files[[software]])
 
   # Calculate log2 normalization factors
- nf_log <- msqrob2::nfLogMedianOfRatios(
-  qf_one,
-  "precursors_log"
-)
+  nf_log <- msqrob2::nfLogMedianOfRatios(qf_one, "precursors_log")
 
   # Check normalization factors
   stopifnot(
@@ -1737,25 +1843,15 @@ for (software in names(qf_object_names)) {
   )
 
   # Create normalized assay
-  qf_one <- sweep(
-    qf_one,
-    MARGIN = 2,
-    STATS = nf_log,
-    i = "precursors_log",
-    name = "precursors_norm"
-  )
+  qf_one <- sweep(qf_one, MARGIN = 2, STATS = nf_log,
+                  FUN = "-",
+                  i = "precursors_log",
+                  name = "precursors_norm")
 
   # Verify all three assays
   stopifnot(
-    all(
-      c("precursors", "precursors_log", "precursors_norm") %in%
-        names(qf_one)
-    ),
-    identical(
-      dim(qf_one[["precursors_log"]]),
-      dim(qf_one[["precursors_norm"]])
-    )
-  )
+    all(c("precursors", "precursors_log", "precursors_norm") %in% names(qf_one)),
+    identical(dim(qf_one[["precursors_log"]]), dim(qf_one[["precursors_norm"]])))
 
   # Summarize normalization factors
   normalization_summary[[software]] <- data.frame(
@@ -1766,13 +1862,13 @@ for (software in names(qf_object_names)) {
     SD_Factor = sd(nf_log)
   )
 
-  # Update existing QFeatures object
-  assign(object_name, qf_one, envir = .GlobalEnv)
 
   # Update existing filtered cache file (no new RDS)
   saveRDS(qf_one, filtered_qf_files[[software]])
-
-  message(software, ": normalization completed")
+  
+  # Check assay structure
+  names(qf_one)
+  plot(qf_one, main=software)
 
   rm(qf_one, nf_log)
   gc(verbose = FALSE)
@@ -1784,18 +1880,8 @@ normalization_summary <- dplyr::bind_rows(
 
 print(normalization_summary)
 
-# Check assay structure
-names(qf_alpha)
-names(qf_diann)
-names(qf_spectro)
-names(qf_maxdia)
-
-# Visualize processing structure
-plot(qf_alpha)
-plot(qf_diann)
-plot(qf_spectro)
-plot(qf_maxdia)
 ```
+## 12. Before&After norm
 
 ```{r evaluate_precursor_normalization, eval=FALSE, fig.width=14, fig.height=10, message=FALSE, warning=FALSE}
 
@@ -1803,27 +1889,29 @@ plot(qf_maxdia)
 # Evaluate Median of Ratios normalization
 # Four DIA software packages, 84 runs each
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  `DIA-NN` = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
 )
-
-set.seed(123)
 
 density_list <- list()
 median_list <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
-  qf_one <- get(qf_object_names[[software]])
+  cat("\nProcessing normalization QC: ", software, "...\n", sep = "")
+  qf_one <- readRDS(filtered_qf_files[[software]])
 
-  before <- assay(qf_one[["precursors_log"]])
-  after  <- assay(qf_one[["precursors_norm"]])
+  se_before <- qf_one[["precursors_log"]]
+  se_after  <- qf_one[["precursors_norm"]]
+  
+  before <- SummarizedExperiment::assay(se_before, withDimnames = FALSE)
+  after <- SummarizedExperiment::assay(se_after, withDimnames = FALSE)
 
-  runs <- colnames(before)
+  runs <- colnames(se_before)
 
   batch <- dplyr::case_when(
     grepl("^Group1_", runs) ~ "Group 1",
@@ -1835,19 +1923,59 @@ for (software in names(qf_object_names)) {
   )
 
   # ----------------------------------------------------------
-  # 1. Run-level medians using all finite intensities
+  # Run-level medians and densities using ALL intensitiess
   # ----------------------------------------------------------
 
-  median_before <- apply(before, 2, function(v) {
-    v <- v[is.finite(v)]
-    if (length(v)) median(v) else NA_real_
-  })
+  median_before <- rep(NA_real_, length(runs))
+  median_after  <- rep(NA_real_, length(runs))
 
-  median_after <- apply(after, 2, function(v) {
-    v <- v[is.finite(v)]
-    if (length(v)) median(v) else NA_real_
-  })
+  run_densities <- vector("list", length(runs) * 2L)
+  
+  for (j in seq_along(runs)) {
+    # Extract all finite intensities for this run
+    x_before <- before[, j]
+    x_before <- x_before[is.finite(x_before)]
 
+    x_after <- after[, j]
+    x_after <- x_after[is.finite(x_after)]
+
+    # Run-level medians
+    if (length(x_before)) {
+      median_before[j] <- median(x_before)
+    }
+
+    if (length(x_after)) {
+      median_after[j] <- median(x_after)
+    }
+
+    # Calculate KDE for each normalization stage
+    for (stage in c("Before", "After")) {
+
+      values <- if (stage == "Before") x_before else x_after
+
+      if (length(values) < 2L || min(values) == max(values)) {
+        next
+      }
+
+      den <- stats::density(
+        values,
+        n = 512L,
+        na.rm = TRUE
+      )
+
+      idx <- (j - 1L) * 2L +
+        if (stage == "Before") 1L else 2L
+
+      run_densities[[idx]] <- data.frame(
+        Software = software,
+        Run = runs[j],
+        Stage = stage,
+        Log2_Intensity = den$x,
+        Density = den$y
+      )
+    }
+  }
+  
   median_list[[software]] <- data.frame(
     Software = software,
     Run = runs,
@@ -1856,45 +1984,23 @@ for (software in names(qf_object_names)) {
     After = as.numeric(median_after)
   )
 
-  # ----------------------------------------------------------
-  # 2. Sample up to 2,000 values per run for density plots
-  # ----------------------------------------------------------
+  # Store density coordinates (not raw intensities)
+  density_list[[software]] <- dplyr::bind_rows(run_densities)
 
-  density_list[[software]] <- dplyr::bind_rows(
-    lapply(seq_along(runs), function(j) {
+  cat( software, ": ", length(runs), " runs; ",
+       nrow(density_list[[software]]), " density coordinates\n", sep = "")
 
-      idx <- which(
-        is.finite(before[, j]) &
-        is.finite(after[, j])
-      )
-
-      if (length(idx) > 2000) {
-        idx <- sample(idx, 2000)
-      }
-
-      data.frame(
-        Software = software,
-        Run = runs[j],
-        Before = before[idx, j],
-        After = after[idx, j]
-      )
-    })
-  )
-
-  rm(qf_one, before, after)
-  gc(verbose = FALSE)
+  rm(qf_one, se_before, se_after, before, after,
+     run_densities, x_before, x_after, values, den)
+  
+  invisible(gc(verbose = FALSE))
 }
 
 # ============================================================
 # Prepare plotting data
 # ============================================================
 
-density_qc <- dplyr::bind_rows(density_list) |>
-  tidyr::pivot_longer(
-    cols = c(Before, After),
-    names_to = "Stage",
-    values_to = "Log2_Intensity"
-  )
+density_qc <- dplyr::bind_rows(density_list) 
 
 median_qc_norm <- dplyr::bind_rows(median_list) |>
   tidyr::pivot_longer(
@@ -1903,9 +2009,7 @@ median_qc_norm <- dplyr::bind_rows(median_list) |>
     values_to = "Median_Log2"
   )
 
-software_order <- c(
-  "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
-)
+software_order <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
 
 batch_order <- c(
   "Group 1", "Group 2", "Group 3",
@@ -1938,17 +2042,18 @@ median_qc_norm$Batch <- factor(
 )
 
 # ============================================================
-# Plot 1: Density distributions before vs. after normalization
+# Plot 1: Full-data density before vs. after normalization
 # ============================================================
 
 p_density <- ggplot2::ggplot(
   density_qc,
   ggplot2::aes(
     x = Log2_Intensity,
-    group = Run
+    y = Density,
+    group = interaction(Software, Run, Stage)
   )
 ) +
-  ggplot2::geom_density(
+  ggplot2::geom_line(
     color = "#277DA1",
     linewidth = 0.35,
     alpha = 0.55
@@ -1959,7 +2064,7 @@ p_density <- ggplot2::ggplot(
   ) +
   ggplot2::labs(
     title = "Precursor intensity distributions before and after normalization",
-    subtitle = "84 runs per software; 2,000 sampled intensities per run",
+    subtitle = "84 runs per software; all finite precursor intensities",
     x = "Log2 precursor intensity",
     y = "Density"
   ) +
@@ -1978,9 +2083,9 @@ print(p_density)
 p_median <- ggplot2::ggplot(
   median_qc_norm,
   ggplot2::aes(
-    x = Batch,
+    x = Stage,
     y = Median_Log2,
-    fill = Batch
+    fill = Stage
   )
 ) +
   ggplot2::geom_boxplot(
@@ -1995,7 +2100,7 @@ p_median <- ggplot2::ggplot(
     alpha = 0.75
   ) +
   ggplot2::facet_grid(
-    Software ~ Stage,
+    Software ~ Batch,
     scales = "free_y"
   ) +
   ggplot2::labs(
@@ -2008,12 +2113,8 @@ p_median <- ggplot2::ggplot(
   ggplot2::theme(
     plot.title = ggplot2::element_text(face = "bold"),
     strip.text = ggplot2::element_text(face = "bold"),
-    axis.text.x = ggplot2::element_text(
-      angle = 35,
-      hjust = 1
-    ),
-    legend.position = "none"
-  )
+    axis.text.x = ggplot2::element_blank(),
+    legend.position = "top")
 
 print(p_median)
 
@@ -2039,104 +2140,23 @@ print(normalization_qc_summary)
 rm(density_list, median_list, density_qc)
 gc(verbose = FALSE)
 ```
-```{r, eval=FALSE}
-set.seed(123)
 
-target_run <- "Group1_c-jun_KO_1"
-
-qf_list <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-
-highlight_data <- dplyr::bind_rows(
-  lapply(names(qf_list), function(software) {
-
-    qf_one <- qf_list[[software]]
-
-    dplyr::bind_rows(
-      lapply(c("precursors_log", "precursors_norm"), function(assay_name) {
-
-        x <- assay(qf_one[[assay_name]])
-
-        dplyr::bind_rows(
-          lapply(seq_len(ncol(x)), function(j) {
-
-            v <- x[, j]
-            v <- v[is.finite(v)]
-
-            if (length(v) > 2000) {
-              v <- sample(v, 2000)
-            }
-
-            data.frame(
-              Software = software,
-              Stage = if (assay_name == "precursors_log") "Before" else "After",
-              Run = colnames(x)[j],
-              Intensity = v,
-              Highlight = if (colnames(x)[j] == target_run) "Suspected outlier" else "Other runs"
-            )
-          })
-        )
-      })
-    )
-  })
-)
-
-highlight_data$Stage <- factor(
-  highlight_data$Stage,
-  levels = c("Before", "After")
-)
-
-ggplot2::ggplot(
-  highlight_data,
-  ggplot2::aes(x = Intensity, group = Run)
-) +
-  ggplot2::geom_density(
-    data = function(d) d[d$Highlight == "Other runs", ],
-    color = "grey75",
-    linewidth = 0.3,
-    alpha = 0.4
-  ) +
-  ggplot2::geom_density(
-    data = function(d) d[d$Highlight == "Suspected outlier", ],
-    color = "red",
-    linewidth = 1.1
-  ) +
-  ggplot2::facet_grid(
-    Software ~ Stage,
-    scales = "free"
-  ) +
-  ggplot2::labs(
-    title = "Investigating the suspected outlier run",
-    subtitle = target_run,
-    x = "Log2 precursor intensity",
-    y = "Density"
-  ) +
-  ggplot2::theme_classic(base_size = 12)
-
-
-
-```
-
-### Removing outlier run
+## 13. Removing outlier run
 One LC-MS run (Group1_c-jun_KO_1) exhibited an atypical precursor intensity distribution across multiple DIA analysis pipelines, most prominently in AlphaDIA and DIA-NN. Given the consistency of this observation across software tools and the availability of additional replicates for the corresponding condition, the run was excluded from downstream quantitative analysis. Normalization was subsequently recalculated using the remaining 83 runs.
 
 ```{r exclude_outlier_and_renormalize, message=FALSE, eval=run_analysis}
 # ============================================================
 # Exclude shared QC outlier and repeat normalization
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
 
 excluded_run <- "Group1_c-jun_KO_1"
-
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  DIANN = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
-)
 
 # Record the exclusion for reproducibility
 qc_exclusions <- data.frame(
@@ -2147,48 +2167,71 @@ qc_exclusions <- data.frame(
   )
 )
 
-# Check that the run exists exactly once in every software
-for (software in names(qf_object_names)) {
+run_present <- setNames(
+  logical(length(software_names)),
+  software_names
+)
 
-  qf_one <- get(qf_object_names[[software]])
+# Check that the run exists exactly once in every software
+for (software in software_names) {
+  
+  message("Checking that the Group1_c-jun_KO_1 exists exactly once in ", software, "...")
+  
+  qf_one <- readRDS(filtered_qf_files[[software]])
 
   runs <- colnames(qf_one[["precursors_log"]])
 
-  stopifnot(sum(runs == excluded_run) == 1L)
+  stopifnot(
+    !anyDuplicated(runs),
+    all(vapply(
+      names(qf_one),
+      function(a) identical(colnames(qf_one[[a]]), runs),
+      logical(1)
+    ))
+  )
+  
+  run_present[software] <- excluded_run %in% runs
+  
+  stopifnot(
+    length(runs) == if (run_present[software]) 84L else 83L
+  )
 
-  # Ensure all assays contain the same runs
-  stopifnot(all(vapply(
-    names(qf_one),
-    function(a) identical(colnames(qf_one[[a]]), runs),
-    logical(1)
-  )))
+  rm(qf_one)
 }
+
 
 exclusion_summary <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
-  message("Processing ", software, "...")
+  message("Excluding and renormalizing", software, "...")
 
-  object_name <- qf_object_names[[software]]
-  qf_one <- get(object_name)
+  qf_one <- readRDS(filtered_qf_files[[software]])
 
   n_before <- ncol(qf_one[["precursors_log"]])
 
+  # Make the chunk safe to rerun
+  if (!(excluded_run %in%
+        colnames(qf_one[["precursors_log"]]))) {
+
+    message(software, ": outlier already excluded; skipping")
+    
+    rm(qf_one)
+    next
+  }
+  
+  # Remove old normalized assay
+  qf_one <- QFeatures::removeAssay(
+    qf_one, "precursors_norm"
+  )
+  
   # 1. Remove the outlier column from all linked assays
   keep_runs <- colnames(qf_one[["precursors_log"]]) != excluded_run
 
   qf_one <- qf_one[, keep_runs, ]
 
-  # 2. Remove previous normalized assay
-  #    (its normalization factors included the excluded run)
-  qf_one <- qf_one[, , names(qf_one) != "precursors_norm"]
-
   # 3. Recalculate Median of Ratios normalization factors
-  nf_log <- msqrob2::nfLogMedianOfRatios(
-    qf_one,
-    "precursors_log"
-  )
+  nf_log <- msqrob2::nfLogMedianOfRatios(qf_one,"precursors_log")
 
   stopifnot(
     length(nf_log) == 83L,
@@ -2196,13 +2239,10 @@ for (software in names(qf_object_names)) {
   )
 
   # 4. Create replacement normalized assay
-  qf_one <- sweep(
-    qf_one,
-    MARGIN = 2,
-    STATS = nf_log,
-    i = "precursors_log",
-    name = "precursors_norm"
-  )
+  qf_one <- sweep(qf_one, MARGIN = 2, STATS = nf_log,
+                  FUN = "-",
+                  i = "precursors_log",
+                  name = "precursors_norm")
 
   # 5. Verify results
   stopifnot(
@@ -2228,8 +2268,6 @@ for (software in names(qf_object_names)) {
     SD_Factor = sd(nf_log)
   )
 
-  # 6. Update object in R environment
-  assign(object_name, qf_one, envir = .GlobalEnv)
 
   # 7. Overwrite existing filtered RDS file
   saveRDS(qf_one, filtered_qf_files[[software]])
@@ -2245,17 +2283,11 @@ exclusion_summary <- dplyr::bind_rows(exclusion_summary)
 print(qc_exclusions)
 print(exclusion_summary)
 
-# Final checks
-sapply(
-  qf_object_names,
-  function(object_name) {
-    ncol(get(object_name)[["precursors_norm"]])
-  }
-)
 ```
 The results strengthen the justification for excluding Group1_c-jun_KO_1, particularly for DIA-NN and MaxDIA (Run chunk 26 to re-check).
 
 
+<<<<<<< HEAD
 ```{r}
 qf_list <- list(
   AlphaDIA = qf_alpha,
@@ -2325,82 +2357,24 @@ p_hist_norm_onePlot <- ggplot2::ggplot(
 
 
 ## NIMAA analysis of precursor detection
+=======
+## 14. NIMAA analysis of precursor detection
+>>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
 
 Precursor detection was represented as a binary precursor-by-run matrix (observed = 1; missing = 0). The NIMAA-style `Rectangular_element_max` method was applied to all precursor features to identify a fully observed rectangular submatrix. The efficient implementation was checked against the original NIMAA output on a 5,000-precursor test matrix.
 
-```{r recover_nimaa_inputs, eval=!run_analysis, message=FALSE}
-# Recover fully processed QFeatures from saved RDS files
 
-qf_alpha <- readRDS(
-  file.path(cache_dir, "qf_AlphaDIA_filtered_final_pr.rds")
+### - nimaa-fast-functions
+
+```{r nimaaFunctions}
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
 )
 
-qf_diann <- readRDS(
-  file.path(cache_dir, "qf_DIANN_filtered_final_pr.rds")
-)
-
-qf_spectro <- readRDS(
-  file.path(cache_dir, "qf_Spectronaut_filtered_final_pr.rds")
-)
-
-qf_maxdia <- readRDS(
-  file.path(cache_dir, "qf_MaxDIA_filtered_final_pr.rds")
-)
-
-qf_nimaa <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-
-stopifnot(all(vapply(
-  qf_nimaa,
-  function(qf) "precursors_norm" %in% names(qf),
-  logical(1)
-)))
-
-cat("Successfully recovered normalized QFeatures for all four pipelines.\n")
-```
-
-```{r nimaa-precursor-incidence}
-# Binary precursor-by-run incidence matrices:
-# 1 = observed finite abundance; 0 = missing
-
-nimaa_incidence <- lapply(qf_nimaa, function(qf) {
-  x <- SummarizedExperiment::assay(qf[["precursors"]])
-
-  # Preserve feature and sample identifiers
-  observed <- is.finite(x)
-
-  # Store as integer values for incidence analysis
-  storage.mode(observed) <- "integer"
-
-  observed
-})
-
-# Validate matrix dimensions and observed fractions
-nimaa_incidence_check <- do.call(
-  rbind,
-  lapply(names(nimaa_incidence), function(software) {
-    x <- nimaa_incidence[[software]]
-
-    data.frame(
-      Software = software,
-      Precursors = nrow(x),
-      Runs = ncol(x),
-      Observed_pct = round(100 * mean(x), 2),
-      Missing_pct = round(100 * (1 - mean(x)), 2),
-      Complete_precursors = sum(rowSums(x) == ncol(x)),
-      Complete_runs = sum(colSums(x) == nrow(x))
-    )
-  })
-)
-
-print(nimaa_incidence_check, row.names = FALSE)
-```
-
-```{r nimaa-fast-functions}
 arrange_nimaa_matrix <- function(x) {
 
   # Step 1: Sort precursors by increasing missingness
@@ -2413,13 +2387,9 @@ arrange_nimaa_matrix <- function(x) {
 
   # Step 3: Lexicographic ordering of precursor detection patterns
   # Equivalent in intent to NIMAA's arrange_if() step
-  row_order3 <- do.call(
-    order,
-    c(
-      lapply(seq_len(ncol(x)), function(j) -x[, j]),
-      list(method = "radix")
-    )
-  )
+  row_order3 <- do.call(order,
+    c(lapply(seq_len(ncol(x)), function(j) -x[, j]),
+      list(method = "radix")))
 
   x[row_order3, , drop = FALSE]
 }
@@ -2449,6 +2419,69 @@ find_nimaa_rectangle <- function(x) {
 }
 ```
 
+### - Checking incidence
+
+```{r nimmaAnalysis, eval=!run_analysis, message=FALSE}
+# Recover fully processed QFeatures from saved RDS files
+
+qf_alpha <- readRDS(filtered_qf_files[["AlphaDIA"]])
+qf_diann <- readRDS(filtered_qf_files[["DIANN"]])
+qf_spectro <- readRDS(filtered_qf_files[["Spectronaut"]])
+qf_maxdia <- readRDS(filtered_qf_files[["MaxDIA"]])
+
+qf_nimaa <- list(
+  AlphaDIA = qf_alpha,
+  "DIA-NN" = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
+)
+
+stopifnot(all(vapply(
+  qf_nimaa,
+  function(qf) "precursors_norm" %in% names(qf),
+  logical(1)
+)))
+
+cat("Successfully recovered normalized QFeatures for all four pipelines.\n")
+
+# ----------------------------------------
+# ----- nimaa-precursor-incidence -----
+# -----------------------------------
+# Binary precursor-by-run incidence matrices:
+# 1 = observed finite abundance; 0 = missing
+nimaa_incidence <- lapply(qf_nimaa, function(qf) {
+  x <- SummarizedExperiment::assay(qf[["precursors"]])
+  # Preserve feature and sample identifiers
+  observed <- is.finite(x)
+  # Store as integer values for incidence analysis
+  storage.mode(observed) <- "integer"
+  observed
+})
+
+# Validate matrix dimensions and observed fractions
+nimaa_incidence_check <- do.call(
+  rbind,
+  lapply(names(nimaa_incidence), function(software) {
+    x <- nimaa_incidence[[software]]
+
+    data.frame(
+      Software = software,
+      Precursors = nrow(x),
+      Runs = ncol(x),
+      Observed_pct = round(100 * mean(x), 2),
+      Missing_pct = round(100 * (1 - mean(x)), 2),
+      Complete_precursors = sum(rowSums(x) == ncol(x)),
+      Complete_runs = sum(colSums(x) == nrow(x))
+    )
+  })
+)
+
+print(nimaa_incidence_check, row.names = FALSE)
+
+```
+
+### - Full arranging
+
 ```{r nimaa-full-element-max, eval=run_analysis}
 nimaa_full_arranged <- lapply(nimaa_incidence, arrange_nimaa_matrix)
 
@@ -2475,10 +2508,9 @@ stopifnot(all(vapply(names(nimaa_full_arranged), function(s) {
 print(nimaa_full_rectangles, row.names = FALSE)
 ```
 
+### - Vis Max Rectangles
+
 ```{r nimaa-precursor-figure, eval=FALSE, fig.width=14, fig.height=9, dpi=300, message=FALSE}
-library(ggplot2)
-library(patchwork)
-library(dplyr)
 
 software_colors <- c(
   "AlphaDIA"    = "#0072B2",
@@ -2636,17 +2668,16 @@ nimaa_precursor_figure <- patchwork::wrap_plots(
   plot_nimaa_precursor("DIA-NN"),
   plot_nimaa_precursor("Spectronaut"),
   plot_nimaa_precursor("MaxDIA"),
-  ncol = 4
+  ncol = 4,
+  axes = "collect_y",
+  axis_titles = "collect"
 )
 nimaa_precursor_figure
 ```
 
-
+### - Vis lollipop
 
 ```{r nimaa-precursor-summary-lollipop, eval=FALSE, fig.width=12, fig.height=5.5, dpi=300}
-library(dplyr)
-library(ggplot2)
-library(scales)
 
 precursor_plot_data <- nimaa_lollipop_data |>
   mutate(
