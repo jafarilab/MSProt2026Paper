@@ -4737,6 +4737,502 @@ ggplot2::ggplot(
 ```
 The correlation matrices reveal high overall protein-level similarity between samples, but clear software-dependent differences and batch-associated variation. DIA-NN exhibits the strongest correlations (median 0.976), with only a small difference between within-batch (0.986) and between-batch (0.974) correlations, indicating highly consistent protein abundance rankings across runs. AlphaDIA and Spectronaut show good overall correlations (medians 0.851 and 0.817), but noticeably higher within-batch than between-batch similarity (differences of 0.084 and 0.093, respectively), supporting the batch effects observed in MDS. MaxDIA displays the lowest overall correlation (median 0.731), the lowest minimum correlation (0.521), and greater sample-to-sample variability. Overall, these findings reinforce the importance of accounting for acquisition batch during differential abundance modeling, particularly for AlphaDIA, Spectronaut, and MaxDIA.
 
+## Biological quality control and acquidtion-batch exclusion
+```{r group4_exclusion_decision}
+# ============================================================
+# Biological QC: Exclusion of acquisition Group 4
+# ============================================================
+#
+# Rationale:
+#
+# The expected reduction in JUN (c-Jun; UniProt P05412)
+# abundance in KO relative to CTRL was absent or reversed
+# in acquisition Group 4 across all four DIA pipelines.
+#
+# This finding was supported by:
+# 1. Protein-level JUN abundance.
+# 2. Multiple JUN peptide sequences.
+# 3. Untreated and cisplatin-treated 6h samples.
+# 4. Proteome-wide genotype signatures excluding JUN.
+# 5. Leave-one-batch-out genotype validation.
+#
+# In contrast, other acquisition batches generally retained
+# the expected genotype-associated proteomic separation.
+#
+# The observations indicate a batch-specific inconsistency
+# in the expected knockout phenotype. They do not establish
+# sample mislabeling or its underlying cause.
+#
+# Decision:
+# Exclude all Group 4 runs from the primary analysis to avoid
+# potential confounding by uncertain biological sample
+# identity or genotype-associated phenotype.
+#
+# The original 83-run analysis should be retained for
+# sensitivity comparisons.
+# ============================================================
+
+library(dplyr)
+
+# Record original analysis population
+sample_design_before_group4 <- sample_design
+
+# Identify excluded runs
+group4_excluded_runs <- sample_design |>
+  filter(as.character(Batch) == "Group 4") |>
+  select(Run, Condition, Batch) |>
+  arrange(Condition, Run)
+
+# Create reduced sample design
+sample_design_no_group4 <- sample_design |>
+  filter(as.character(Batch) != "Group 4") |>
+  mutate(
+    Batch = droplevels(factor(Batch)),
+    Condition = droplevels(factor(Condition))
+  )
+
+# Document exclusion
+group4_exclusion_summary <- data.frame(
+  Criterion = c(
+    "Original QC-retained runs",
+    "Excluded Group 4 runs",
+    "Runs retained after Group 4 exclusion",
+    "Conditions retained"
+  ),
+  Value = c(
+    nrow(sample_design_before_group4),
+    nrow(group4_excluded_runs),
+    nrow(sample_design_no_group4),
+    dplyr::n_distinct(sample_design_no_group4$Condition)
+  )
+)
+
+print(group4_exclusion_summary)
+print(group4_excluded_runs)
+
+# Verify expected sample counts
+stopifnot(
+  nrow(sample_design_before_group4) == 83,
+  nrow(group4_excluded_runs) == 15,
+  nrow(sample_design_no_group4) == 68,
+  dplyr::n_distinct(sample_design_no_group4$Condition) == 8,
+  !any(as.character(sample_design_no_group4$Batch) == "Group 4")
+)
+
+# Confirm that the reduced batch-adjusted design is full rank
+design_no_group4 <- model.matrix(
+  ~ 0 + Condition + Batch,
+  data = sample_design_no_group4
+)
+
+group4_design_check <- data.frame(
+  Parameters = ncol(design_no_group4),
+  Rank = qr(design_no_group4)$rank,
+  Full_rank = qr(design_no_group4)$rank ==
+    ncol(design_no_group4)
+)
+
+print(group4_design_check)
+
+# Save the exclusion record
+saveRDS(
+  list(
+    rationale = paste(
+      "Group 4 excluded following concordant JUN and",
+      "proteome-wide genotype QC anomalies across four",
+      "DIA pipelines; sample mislabeling remains unconfirmed."
+    ),
+    excluded_runs = group4_excluded_runs,
+    sample_design_original = sample_design_before_group4,
+    sample_design_reduced = sample_design_no_group4,
+    exclusion_summary = group4_exclusion_summary,
+    design_check = group4_design_check
+  ),
+  file = file.path(results_dir, "group4_exclusion_record.rds")
+)
+# JUN protein group
+```
+
+```{r}
+jun_accession <- "P05412"
+
+jun_candidates <- dplyr::bind_rows(
+  lapply(names(qf_models), function(software) {
+
+    rd <- as.data.frame(
+      SummarizedExperiment::rowData(
+        qf_models[[software]][["proteins"]]
+      )
+    )
+
+    # Match JUN accession as a complete identifier,
+    # including within semicolon-separated protein groups
+    hit <- grepl(
+      paste0("(^|[;|])", jun_accession, "($|[;|])"),
+      as.character(rd$Protein.Group)
+    )
+
+    # Also search Protein.Ids where available
+    if ("Protein.Ids" %in% names(rd)) {
+      hit <- hit | grepl(
+        paste0("(^|[;|])", jun_accession, "($|[;|])"),
+        as.character(rd$Protein.Ids)
+      )
+    }
+
+    hit[is.na(hit)] <- FALSE
+
+    data.frame(
+      Software = software,
+      Protein.Group = as.character(rd$Protein.Group[hit])
+    )
+  })
+)
+
+print(jun_candidates, row.names = FALSE)
+```
+
+```{r}
+# Keep candidate groups present in the protein assays
+jun_groups <- jun_candidates
+
+# Require one unambiguous JUN protein group per pipeline
+stopifnot(
+  nrow(jun_groups) == 4,
+  all(table(jun_groups$Software) == 1)
+)
+
+jun_data <- dplyr::bind_rows(
+  lapply(names(qf_models), function(software) {
+
+    se <- qf_models[[software]][["proteins"]]
+
+    protein_id <- jun_groups$Protein.Group[
+      jun_groups$Software == software
+    ]
+
+    data.frame(
+      Software = software,
+      Run = colnames(se),
+      Log2_Intensity = as.numeric(
+        SummarizedExperiment::assay(se)[protein_id, ]
+      )
+    )
+  })
+) |>
+  left_join(sample_design, by = "Run") |>
+  mutate(
+    Genotype = case_when(
+      grepl("^CTRL_", Condition) ~ "CTRL",
+      grepl("^KO_", Condition) ~ "KO",
+      TRUE ~ NA_character_
+    ),
+    Genotype = factor(Genotype, levels = c("CTRL", "KO")),
+    Software = factor(Software, levels = names(qf_models))
+  ) |>
+  filter(
+    !is.na(Genotype),
+    grepl("Untreated|Baseline", Condition, ignore.case = TRUE)
+  )
+
+# Check sample coverage before plotting
+jun_data |>
+  group_by(Software, Batch, Genotype) |>
+  summarise(
+    Total = n(),
+    Quantified = sum(is.finite(Log2_Intensity)),
+    .groups = "drop"
+  ) |>
+  print(n = Inf)
+
+p_jun <- ggplot(
+  jun_data,
+  aes(
+    x = Genotype,
+    y = Log2_Intensity,
+    color = Genotype
+  )
+) +
+  geom_boxplot(
+    width = 0.5,
+    outlier.shape = NA,
+    na.rm = TRUE
+  ) +
+  geom_jitter(
+    width = 0.12,
+    size = 2,
+    alpha = 0.8,
+    na.rm = TRUE
+  ) +
+  facet_grid(Software ~ Batch, scales = "free_y") +
+  scale_color_manual(
+    values = c(CTRL = "#0072B2", KO = "#D55E00")
+  ) +
+  labs(
+    title = "JUN abundance across DIA pipelines",
+    subtitle = "Untreated samples stratified by genotype and acquisition batch",
+    x = NULL,
+    y = "Normalized log2 JUN protein intensity"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p_jun)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+jun_precursor_data <- bind_rows(
+  lapply(names(qf_models), function(software) {
+
+    se <- qf_models[[software]][["precursors_norm"]]
+    rd <- as.data.frame(SummarizedExperiment::rowData(se))
+
+    hit <- as.character(rd$Protein.Group) == "P05412"
+    hit[is.na(hit)] <- FALSE
+
+    if (!any(hit)) {
+      warning("No JUN precursors found in ", software)
+      return(NULL)
+    }
+
+    x <- SummarizedExperiment::assay(se)[hit, , drop = FALSE]
+
+    data.frame(
+      Software = software,
+      Precursor = as.character(rd$Precursor.Id[hit])[
+        row(x)
+      ],
+      Run = colnames(x)[col(x)],
+      Log2_Intensity = as.vector(x)
+    )
+  })
+) |>
+  left_join(sample_design, by = "Run") |>
+  mutate(
+    Genotype = case_when(
+      grepl("^CTRL_", Condition) ~ "CTRL",
+      grepl("^KO_", Condition) ~ "KO",
+      TRUE ~ NA_character_
+    ),
+    Genotype = factor(Genotype, levels = c("CTRL", "KO")),
+    Software = factor(Software, levels = names(qf_models))
+  ) |>
+  filter(
+    !is.na(Genotype),
+    grepl("Untreated|Baseline", Condition, ignore.case = TRUE)
+  )
+
+# Check how many JUN precursors each pipeline quantifies
+jun_precursor_data |>
+  group_by(Software) |>
+  summarise(
+    Precursors = n_distinct(Precursor),
+    Quantified_measurements = sum(is.finite(Log2_Intensity)),
+    .groups = "drop"
+  ) |>
+  print(n = Inf)
+
+p_jun_precursors <- ggplot(
+  jun_precursor_data |>
+    filter(is.finite(Log2_Intensity)),
+  aes(
+    x = Genotype,
+    y = Log2_Intensity,
+    color = Genotype
+  )
+) +
+  geom_boxplot(
+    width = 0.5,
+    outlier.shape = NA
+  ) +
+  geom_jitter(
+    width = 0.15,
+    size = 1.5,
+    alpha = 0.65
+  ) +
+  facet_grid(Software ~ Batch, scales = "free_y") +
+  scale_color_manual(
+    values = c(CTRL = "#0072B2", KO = "#D55E00")
+  ) +
+  labs(
+    title = "JUN precursor abundance across DIA pipelines",
+    subtitle = "Untreated samples by genotype and acquisition batch",
+    x = NULL,
+    y = "Normalized log2 precursor intensity"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p_jun_precursors)
+```
+
+```{r group4_biological_qc_figure, fig.width=15, fig.height=12}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Consistent acquisition batch ordering
+qc_batch_order <- c(
+  "Group 1", "Group 2", "Group 3",
+  "Group 4", "20260331"
+)
+
+# ------------------------------------------------------------
+# A. JUN protein abundance by genotype and acquisition batch
+# ------------------------------------------------------------
+
+p_qc_a <- ggplot(
+  jun_data |>
+    mutate(
+      Batch = factor(as.character(Batch), levels = qc_batch_order),
+      Software = factor(as.character(Software), levels = software_order)
+    ),
+  aes(x = Genotype, y = Log2_Intensity, color = Genotype)
+) +
+  geom_boxplot(
+    width = 0.5,
+    outlier.shape = NA,
+    na.rm = TRUE
+  ) +
+  geom_jitter(
+    width = 0.12,
+    size = 1.6,
+    alpha = 0.8,
+    na.rm = TRUE
+  ) +
+  facet_grid(Software ~ Batch, scales = "free_y") +
+  scale_color_manual(
+    values = c(CTRL = "#0072B2", KO = "#D55E00")
+  ) +
+  labs(
+    x = NULL,
+    y = "Normalized log2 JUN protein intensity"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.spacing = grid::unit(0.7, "lines")
+  )
+
+# ------------------------------------------------------------
+# B. JUN peptide-level KO - CTRL effects
+# ------------------------------------------------------------
+
+p_qc_b <- ggplot(
+  jun_peptide_effects |>
+    mutate(
+      Batch = factor(as.character(Batch), levels = qc_batch_order),
+      Software = factor(as.character(Software), levels = software_order)
+    ),
+  aes(
+    x = Batch,
+    y = KO_minus_CTRL,
+    group = Peptide,
+    color = Peptide
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    color = "gray50"
+  ) +
+  geom_line(alpha = 0.6, linewidth = 0.5) +
+  geom_point(size = 2) +
+  facet_wrap(~Software, ncol = 2) +
+  labs(
+    x = NULL,
+    y = "JUN peptide difference (KO - CTRL)",
+    color = "Peptide sequence"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 35, hjust = 1),
+    legend.position = "bottom",
+    legend.text = element_text(size = 8)
+  )
+
+# ------------------------------------------------------------
+# C. Leave-one-batch-out genotype signature validation
+# ------------------------------------------------------------
+
+p_qc_c <- ggplot(
+  lobo_summary |>
+    mutate(
+      Batch = factor(as.character(Batch), levels = qc_batch_order),
+      Software = factor(as.character(Software), levels = software_order)
+    ),
+  aes(
+    x = Batch,
+    y = KO_minus_CTRL,
+    color = Software,
+    group = Software
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    color = "gray50"
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 3) +
+  scale_color_manual(values = software_colors) +
+  labs(
+    x = "Held-out acquisition batch",
+    y = "Genotype signature difference (KO - CTRL)",
+    color = "Pipeline"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    legend.position = "bottom"
+  )
+
+# ------------------------------------------------------------
+# Composite QC figure
+# ------------------------------------------------------------
+
+qc_tag <- function(p, letter) {
+  patchwork::wrap_elements(full = p) +
+    labs(tag = letter) +
+    theme(
+      plot.tag = element_text(size = 25, face = "bold"),
+      plot.tag.position = c(0, 1)
+    )
+}
+
+fig_group4_qc <-
+  qc_tag(p_qc_a, "A") /
+  (qc_tag(p_qc_b, "B") | qc_tag(p_qc_c, "C")) +
+  plot_layout(heights = c(1.25, 1))
+
+print(fig_group4_qc)
+
+export_figure(
+  fig_group4_qc,
+  "Group4_Biological_QC_Exclusion",
+  width = 15,
+  height = 12
+)
+```
+
+
 # Data modeling
 The experimental design also shows that 6-hour treatments were acquired in Groups 3–4, while 24-hour treatments were acquired in Groups 1–2 and 20260331.
 This means direct 6-hour versus 24-hour comparisons are particularly vulnerable to batch confounding. However, comparisons such as KO versus CTRL within the same treatment and time point are better supported because those conditions share acquisition batches.
@@ -9075,9 +9571,9 @@ export_figure <- function(p, filename, width, height) {
 ```{r export_figure_2_identification, eval=FALSE}
 library(patchwork)
 
-p2a <- get_plot("p_precursor_coverage")
-p2b <- get_plot("p_upset_precursors")
-p2c <- get_plot("p_upset_identification")
+p2c <- get_plot("p_precursor_coverage")
+p2a <- get_plot("p_upset_precursors")
+p2b <- get_plot("p_upset_identification")
 
 
 fig2 <- (
@@ -9091,7 +9587,7 @@ fig2 <- (
     plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(fig2, "Figure_2_Identification", 10, 9)
+export_figure(fig2, "Figure_2_Identification", 8, 10)
 print(fig2)
 ```
 **Figure 2. Precursor coverage and identification overlap across four DIA proteomics analysis pipelines.** (A) Distribution of unique peptide sequence–charge combinations per protein group identified by AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Boxplots show the median, interquartile range, and whiskers, with counts displayed on a logarithmic (log10) scale. (B) UpSet plot showing shared and pipeline-specific precursor identifications. Intersection bars indicate the number of unique peptide sequence–charge combinations identified by each pipeline combination, while horizontal bars represent the total number identified by each pipeline. Precursors were harmonized using stripped peptide sequence and charge state; modified forms sharing the same sequence and charge were collapsed into a single identifier. (C) UpSet plot showing shared and pipeline-specific protein-group identifications, using exact protein-group identifier matching. Intersection bars indicate the number of protein groups associated with each pipeline combination, and horizontal bars show the total number identified by each pipeline. Filled dots and connecting lines indicate the pipelines contributing to each intersection. All analyses were based on the same 83-sample dataset.
