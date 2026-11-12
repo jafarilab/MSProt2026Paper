@@ -6,3 +6,7 @@
 figures
 .RDataTmp
 NIMAA_precursor_nestedness_boxplot.png
+qf_models_83_backup.rds
+*.RData
+*.rda
+*.rds

@@ -5262,6 +5262,7 @@ export_figure(
   height = 12
 )
 ```
+
 ### Filtering out Group4 batch
 ```{r exclude_group4_68runs}
 library(dplyr)
@@ -5435,7 +5436,8 @@ print(data.frame(
   Runs = vapply(proteins_68, ncol, integer(1))
 ))
 ```
-### Protein-level MDS - 68 runs
+
+### 68 Protein-level MDS
 ```{r protein_mds_qc, fig.width=15, fig.height=11, message=FALSE, warning=FALSE}
 # ============================================================
 # Protein-level MDS: four DIA software packages
@@ -5582,7 +5584,13 @@ p_mds_batch <- ggplot2::ggplot(
 
 print(p_mds_batch)
 ```
-### Experimental condition-batch balance - 68 runs
+- Protein-level dimensionality reduction
+
+Protein-level multidimensional scaling (MDS) was performed independently for AlphaDIA, DIA-NN, Spectronaut, and MaxDIA using the 68 retained LC-MS runs. The analysis included 8,901, 7,570, 7,594, and 7,518 complete-case protein groups, respectively. MDS plots revealed pronounced acquisition-batch-associated clustering across all four pipelines. AlphaDIA, DIA-NN, and Spectronaut exhibited clearly separated batch-associated clusters, whereas MaxDIA showed greater dispersion and partial overlap between batches. In contrast, samples from different experimental conditions frequently occupied overlapping regions within the MDS space, indicating that acquisition batch was more strongly associated with the dominant axes of protein-level variation than experimental condition. These patterns demonstrate that substantial batch-associated variation remained after normalization and exclusion of Group 4.
+
+
+
+### 68 Experimental condition-batch balance
 ```{r qc_condition_batch_balance, fig.width=12, fig.height=7, message=FALSE, warning=FALSE}
 # ============================================================
 # Experimental condition distribution across retained batches
@@ -5667,7 +5675,12 @@ cat(
 stopifnot(qr(design_68)$rank == ncol(design_68))
 ```
 
-### Protein level Spearman correlation matrices - 68 runs
+- Experimental condition distribution across acquisition batches
+
+Following exclusion of Group 4, the dataset comprised 68 samples across eight experimental conditions and four acquisition batches. Untreated CTRL and KO samples were represented in all four batches, with 15 and 14 samples, respectively. The 24-hour treatment conditions were represented across Groups 1 and 2 and batch 20260331, whereas all three 6-hour treatment conditions were restricted to Group 3, with three replicates per condition. The additive experimental design incorporating condition and acquisition batch was full rank (11 of 11 parameters), supporting estimation of the corresponding model coefficients. Nevertheless, the incomplete crossing of treatment duration and acquisition batch limits the interpretation of direct comparisons between 6-hour and 24-hour responses, which may be influenced by batch-associated variation.
+
+
+### 68 Protein level Spearman correlation matrices
 
 ```{r qc_protein_spearman_correlation, fig.width=14, fig.height=12, message=FALSE, warning=FALSE}
 # ============================================================
@@ -5823,7 +5836,9 @@ p_correlation <- ggplot2::ggplot(
 
 print(p_correlation)
 ```
+- Protein-level sample correlations
 
+Sample-to-sample Spearman correlation analysis revealed substantial differences in quantitative consistency among the four DIA pipelines. DIA-NN exhibited the highest median correlation (0.978), followed by AlphaDIA (0.869), Spectronaut (0.829), and MaxDIA (0.720). Within-batch correlations were consistently higher than between-batch correlations, with median values of 0.922 versus 0.850 for AlphaDIA, 0.985 versus 0.976 for DIA-NN, 0.899 versus 0.814 for Spectronaut, and 0.786 versus 0.715 for MaxDIA. The correlation heatmaps showed corresponding block-like patterns associated with acquisition batch, particularly in AlphaDIA, Spectronaut, and MaxDIA. Together with the MDS results, these observations indicate that batch-associated variation remains an important feature of the retained dataset and should be accounted for in subsequent differential abundance analyses.
 
 
 # Data modeling
@@ -6089,6 +6104,273 @@ Nine of the eleven contrasts have direct within-batch support. These should be t
 The two 24 h versus 6 h comparisons are mathematically estimable but have no shared acquisition batches. Their estimates depend on the additive batch-effect assumption and the untreated samples that connect batches. I recommend treating these as exploratory rather than primary contrasts.
 
 Although the overall design supports these contrasts, individual proteins may have missing observations. A protein measured only in certain batches or conditions may not support every contrast, even when the overall design matrix is full rank.
+
+# 68 Data modeling
+Following the exclusion of acquisition Group 4, the primary analysis comprised 68 LC-MS runs across eight experimental conditions and four acquisition batches. The 6-hour treatment conditions were represented exclusively in Group 3, whereas the 24-hour treatment conditions were distributed across Groups 1, 2, and 20260331. Untreated CTRL and KO samples were represented across all four retained batches.
+
+Protein-level differential abundance was modeled using experimental condition and acquisition batch as additive fixed effects. This approach accounts for systematic batch-associated differences while estimating condition-specific abundance changes. Comparisons between conditions represented within the same acquisition batches have direct within-batch support. In contrast, comparisons between 6-hour and 24-hour treatment conditions lack direct within-batch replication and therefore depend more strongly on the assumption of additive batch effects.
+## 68 Construct and evaluate the design matrix
+```{r qc_design_matrix_68, message=FALSE, warning=FALSE}
+# ============================================================
+# Design matrix diagnostics: 68-run analysis
+# ============================================================
+
+# Preserve the original formula
+model_68 <- ~ Batch + condition
+
+# Build metadata from the verified 68-run sample design
+design_data_68 <- data.frame(
+  Run = as.character(sample_design_68$Run),
+  condition = as.character(sample_design_68$Condition),
+  Batch = as.character(sample_design_68$Batch),
+  stringsAsFactors = FALSE
+)
+
+# Define the same condition reference levels as the 83-run model
+condition_levels <- c(
+  "CTRL_Untreated_Baseline",
+  "KO_Untreated_Baseline",
+  "CTRL_cDDP_6h",
+  "KO_cDDP_6h",
+  "CTRL_JNK_IN_8_cDDP_6h",
+  "CTRL_cDDP_24h",
+  "KO_cDDP_24h",
+  "CTRL_JNK_IN_8_cDDP_24h"
+)
+
+design_data_68$condition <- factor(
+  design_data_68$condition,
+  levels = condition_levels
+)
+
+# Match the original batch coding, excluding Group 4
+design_data_68$Batch <- factor(
+  gsub(" ", "", design_data_68$Batch, fixed = TRUE),
+  levels = c(
+    "Group1", "Group2", "Group3", "20260331"
+  )
+)
+
+stopifnot(
+  nrow(design_data_68) == 68L,
+  !anyNA(design_data_68$condition),
+  !anyNA(design_data_68$Batch),
+  !anyDuplicated(design_data_68$Run),
+  setequal(
+    design_data_68$Run,
+    colnames(proteins_68[["AlphaDIA"]])
+  )
+)
+
+# Construct design matrix
+design_matrix_68 <- stats::model.matrix(
+  model_68,
+  data = design_data_68
+)
+
+design_rank_68 <- qr(design_matrix_68)$rank
+n_parameters_68 <- ncol(design_matrix_68)
+
+design_summary_68 <- data.frame(
+  Runs = nrow(design_matrix_68),
+  Parameters = n_parameters_68,
+  Rank = design_rank_68,
+  Full_Rank = design_rank_68 == n_parameters_68,
+  Residual_DF = nrow(design_matrix_68) - design_rank_68
+)
+
+print(design_summary_68)
+
+cat("\nDesign matrix columns:\n")
+print(colnames(design_matrix_68))
+
+cat("\nCondition by batch:\n")
+print(table(
+  design_data_68$condition,
+  design_data_68$Batch
+))
+
+if (design_rank_68 < n_parameters_68) {
+
+  aliased_68 <- stats::alias(
+    stats::lm(
+      stats::rnorm(nrow(design_data_68)) ~
+        Batch + condition,
+      data = design_data_68
+    )
+  )
+
+  print(aliased_68$Complete)
+
+  stop("The 68-run design matrix is rank deficient.")
+
+} else {
+  cat("\n68-run design matrix is full rank.\n")
+}
+```
+## 68 Evaluate biologically relevant contrasts
+```{r qc_contrast_estimability_68, message=FALSE, warning=FALSE}
+# ============================================================
+# Planned biological contrasts: 68-run analysis
+# ============================================================
+
+# Preserve the original contrast definitions
+planned_contrasts_68 <- planned_contrasts
+
+stopifnot(
+  nrow(planned_contrasts_68) == 11L,
+  all(planned_contrasts_68$Numerator %in%
+        levels(design_data_68$condition)),
+  all(planned_contrasts_68$Denominator %in%
+        levels(design_data_68$condition))
+)
+
+# Construct reference design rows for every condition.
+# All conditions are evaluated at the same batch level,
+# so the additive batch coefficients cancel in contrasts.
+
+reference_data_68 <- data.frame(
+  Batch = factor(
+    rep("Group1", nlevels(design_data_68$condition)),
+    levels = levels(design_data_68$Batch)
+  ),
+  condition = factor(
+    levels(design_data_68$condition),
+    levels = levels(design_data_68$condition)
+  )
+)
+
+reference_matrix_68 <- stats::model.matrix(
+  model_68,
+  data = reference_data_68
+)
+
+rownames(reference_matrix_68) <-
+  as.character(reference_data_68$condition)
+
+stopifnot(
+  identical(
+    colnames(reference_matrix_68),
+    colnames(design_matrix_68)
+  )
+)
+
+# ------------------------------------------------------------
+# Identify the null space of the design matrix
+# ------------------------------------------------------------
+
+sv_68 <- svd(
+  design_matrix_68,
+  nu = 0,
+  nv = ncol(design_matrix_68)
+)
+
+tol_68 <- max(dim(design_matrix_68)) *
+  max(sv_68$d) *
+  .Machine$double.eps
+
+rank_svd_68 <- sum(sv_68$d > tol_68)
+
+null_basis_68 <- if (
+  rank_svd_68 < ncol(design_matrix_68)
+) {
+  sv_68$v[
+    ,
+    seq.int(rank_svd_68 + 1L, ncol(design_matrix_68)),
+    drop = FALSE
+  ]
+} else {
+  matrix(
+    0,
+    nrow = ncol(design_matrix_68),
+    ncol = 0
+  )
+}
+
+# ------------------------------------------------------------
+# Identify acquisition batches represented per condition
+# ------------------------------------------------------------
+
+batch_sets_68 <- lapply(
+  levels(design_data_68$condition),
+  function(cond) {
+    unique(as.character(
+      design_data_68$Batch[
+        design_data_68$condition == cond
+      ]
+    ))
+  }
+)
+
+names(batch_sets_68) <- levels(design_data_68$condition)
+
+# ------------------------------------------------------------
+# Evaluate each contrast
+# ------------------------------------------------------------
+
+contrast_results_68 <- lapply(
+  seq_len(nrow(planned_contrasts_68)),
+  function(i) {
+
+    numerator <- planned_contrasts_68$Numerator[i]
+    denominator <- planned_contrasts_68$Denominator[i]
+
+    contrast_vector <-
+      reference_matrix_68[numerator, ] -
+      reference_matrix_68[denominator, ]
+
+    max_null_component <- if (
+      ncol(null_basis_68) == 0L
+    ) {
+      0
+    } else {
+      max(abs(drop(
+        contrast_vector %*% null_basis_68
+      )))
+    }
+
+    shared_batches <- intersect(
+      batch_sets_68[[numerator]],
+      batch_sets_68[[denominator]]
+    )
+
+    data.frame(
+      Contrast = planned_contrasts_68$Contrast[i],
+      Estimable = max_null_component < 1e-8,
+      Shared_Batches = length(shared_batches),
+      Batch_Names = if (length(shared_batches)) {
+        paste(shared_batches, collapse = ", ")
+      } else {
+        "None"
+      },
+      stringsAsFactors = FALSE
+    )
+  }
+)
+
+contrast_estimability_68 <- dplyr::bind_rows(
+  contrast_results_68
+)
+
+print(contrast_estimability_68, row.names = FALSE)
+
+cat(
+  "\nEstimable contrasts:",
+  sum(contrast_estimability_68$Estimable),
+  "of",
+  nrow(contrast_estimability_68),
+  "\n"
+)
+
+cat(
+  "Contrasts with direct within-batch support:",
+  sum(contrast_estimability_68$Shared_Batches > 0),
+  "of",
+  nrow(contrast_estimability_68),
+  "\n"
+)
+```
+
 ## Protein-level missingness and contrast-specific data availability
 ```{r qc_protein_contrast_availability, message=FALSE, warning=FALSE}
 # ============================================================
@@ -6488,6 +6770,119 @@ print(
 The median protein-specific design rank is 12 for every software pipeline, matching the number of model coefficients. This means that nearly all proteins have sufficient observations across the experimental conditions and acquisition batches to estimate every coefficient in the proposed model. Importantly, the remaining rank-deficient proteins are not necessarily unusable. Some can still support particular biological contrasts.
 Protein-specific design matrix diagnostics demonstrated high model identifiability across all four DIA analysis pipelines. Full-rank design matrices were obtained for 98.04% of AlphaDIA proteins, 97.70% of DIA-NN proteins, 99.99% of Spectronaut proteins, and 99.93% of MaxDIA proteins. Across the eleven planned biological contrasts, mathematical estimability exceeded 98.9% for every pipeline. These findings indicate that protein-level missingness is unlikely to substantially restrict differential abundance analysis. Nevertheless, direct comparisons between 6-hour and 24-hour cisplatin treatments remain dependent on additive batch-effect assumptions because the treatment groups were acquired in separate batches. Therefore, subsequent statistical modeling will incorporate acquisition batch as a fixed effect, with cross-time-point comparisons interpreted cautiously.
 
+## 68 Protein-level missingness and contrast-specific data availability
+```{r qc_protein_availability_estimability_68, message=FALSE, warning=FALSE}
+
+# 68-run protein availability and contrast estimability
+C <- t(vapply(seq_len(nrow(planned_contrasts_68)), function(i)
+  reference_matrix_68[planned_contrasts_68$Numerator[i], ] -
+  reference_matrix_68[planned_contrasts_68$Denominator[i], ],
+  numeric(ncol(design_matrix_68))))
+rownames(C) <- planned_contrasts_68$Contrast
+
+protein_availability_68 <- list()
+contrast_availability_68 <- list()
+protein_rank_results_68 <- list()
+protein_contrast_results_68 <- list()
+
+for (sw in names(proteins_68)) {
+  x <- SummarizedExperiment::assay(proteins_68[[sw]])
+  idx <- match(colnames(x), design_data_68$Run)
+  stopifnot(ncol(x) == 68L, !anyNA(idx))
+  meta <- design_data_68[idx, ]
+  X <- design_matrix_68[idx, , drop = FALSE]
+  d <- is.finite(x)
+  n <- nrow(x)
+  counts <- rowSums(d)
+
+  protein_availability_68[[sw]] <- data.frame(
+    Software = sw, Total_Proteins = n, Runs = ncol(x),
+    Complete_Proteins = sum(counts == ncol(x)),
+    Complete_Percent = 100 * mean(counts == ncol(x)),
+    Median_Detected_Runs = median(counts),
+    Proteins_At_Least_Half_Runs = sum(counts >= ceiling(ncol(x)/2))
+  )
+
+  # Cache calculations for identical missingness patterns
+  keys <- apply(d, 1, function(z)
+  paste0(as.integer(z), collapse = ""))
+  unique_keys <- unique(keys)
+  pattern_stats <- lapply(unique_keys, function(k) {
+    obs <- which(strsplit(k, "", fixed = TRUE)[[1]] == "1")
+    Xi <- X[obs, , drop = FALSE]
+    if (!nrow(Xi)) return(c(0, 0, rep(0, nrow(C))))
+    s <- svd(Xi, nu = 0, nv = ncol(Xi))
+    tol <- max(dim(Xi)) * max(s$d) * .Machine$double.eps
+    r <- sum(s$d > tol)
+    est <- if (r == ncol(Xi)) rep(TRUE, nrow(C)) else {
+      N <- s$v[, seq.int(r + 1L, ncol(Xi)), drop = FALSE]
+      apply(abs(C %*% N), 1, max) < 1e-8
+    }
+    c(r, as.integer(r == ncol(X)), as.integer(est))
+  })
+  stats <- do.call(rbind, pattern_stats)[match(keys, unique_keys), , drop = FALSE]
+
+  protein_rank_results_68[[sw]] <- data.frame(
+    Software = sw, Total_Proteins = n,
+    Unique_Missingness_Patterns = length(unique_keys),
+    Full_Rank_Proteins = sum(stats[, 2]),
+    Full_Rank_Percent = 100 * mean(stats[, 2]),
+    Median_Protein_Rank = median(stats[, 1])
+  )
+
+  protein_contrast_results_68[[sw]] <- data.frame(
+    Software = sw, Contrast = rownames(C),
+    Estimable_Proteins = colSums(stats[, -(1:2), drop = FALSE]),
+    Total_Proteins = n
+  )
+
+  contrast_availability_68[[sw]] <- dplyr::bind_rows(
+    lapply(seq_len(nrow(planned_contrasts_68)), function(i) {
+      a <- planned_contrasts_68$Numerator[i]
+      b <- planned_contrasts_68$Denominator[i]
+      na <- rowSums(d[, meta$condition == a, drop = FALSE])
+      nb <- rowSums(d[, meta$condition == b, drop = FALSE])
+      both <- na >= 2 & nb >= 2
+      shared <- rep(FALSE, n)
+      for (batch in levels(meta$Batch)) {
+        ia <- meta$condition == a & meta$Batch == batch
+        ib <- meta$condition == b & meta$Batch == batch
+        if (any(ia) && any(ib))
+          shared <- shared | (
+            rowSums(d[, ia, drop = FALSE]) > 0 &
+            rowSums(d[, ib, drop = FALSE]) > 0
+          )
+      }
+      data.frame(
+        Software = sw, Contrast = planned_contrasts_68$Contrast[i],
+        Total_Proteins = n,
+        Both_Groups_At_Least_2 = sum(both),
+        Both_Groups_Percent = 100 * mean(both),
+        Shared_Batch_Support = sum(shared),
+        Both_And_Shared_Batch = sum(both & shared),
+        Both_And_Shared_Percent = 100 * mean(both & shared)
+      )
+    })
+  )
+  rm(x, d, stats, pattern_stats)
+  gc(verbose = FALSE)
+}
+
+protein_availability_summary_68 <- dplyr::bind_rows(protein_availability_68)
+contrast_availability_summary_68 <- dplyr::bind_rows(contrast_availability_68)
+protein_rank_summary_68 <- dplyr::bind_rows(protein_rank_results_68)
+protein_contrast_estimability_68 <- dplyr::bind_rows(protein_contrast_results_68) |>
+  dplyr::mutate(Estimable_Percent = 100 * Estimable_Proteins / Total_Proteins)
+
+print(protein_availability_summary_68, row.names = FALSE)
+print(contrast_availability_summary_68, row.names = FALSE)
+print(protein_rank_summary_68, row.names = FALSE)
+print(protein_contrast_estimability_68, row.names = FALSE)
+```
+
+
+Following exclusion of Group 4, protein-level completeness across the 68 retained runs was 78.6% for AlphaDIA, 77.0% for DIA-NN, 95.3% for Spectronaut, and 88.6% for MaxDIA. Median protein detection was 68 runs across all four pipelines. Protein-specific design matrices were full rank for 97.3%, 95.8%, 99.9%, and 99.9% of proteins, respectively, with a median rank of 11. Across the 11 planned contrasts, mathematical estimability ranged from 98.3–99.9% for AlphaDIA, 97.1–99.8% for DIA-NN, 99.9–100% for Spectronaut, and 99.9–100% for MaxDIA. Nine contrasts had direct within-batch support, whereas the two 6-hour versus 24-hour comparisons lacked overlapping acquisition batches and therefore require cautious interpretation. Overall, these findings support proceeding with batch-adjusted protein-level differential abundance modeling without additional global completeness filtering.
+
 ## Statistical inference
 
 This chunk will:
@@ -6600,6 +6995,103 @@ model_design_summary <- dplyr::bind_rows(
 )
 
 print(model_design_summary, row.names = FALSE)
+```
+
+## 68 Statistical inference
+```{r prepare_batch_metadata_fixed_68, message=FALSE, warning=FALSE}
+
+# Prepare batch metadata for 68-run statistical inference
+model_68 <- ~ Batch + condition
+model_design_summary_68 <- list()
+
+stopifnot(
+  identical(names(qf_models_68), software_order),
+  nrow(design_data_68) == 68L
+)
+
+for (software in names(qf_models_68)) {
+
+  qf <- qf_models_68[[software]]
+  se <- qf[["proteins"]]
+
+  # Match protein samples to validated 68-run design
+  idx <- match(colnames(se), design_data_68$Run)
+
+  stopifnot(
+    ncol(se) == 68L,
+    !anyNA(idx)
+  )
+
+  # Update QFeatures parent metadata
+  cd <- SummarizedExperiment::colData(qf)
+  parent_idx <- match(rownames(cd), design_data_68$Run)
+
+  stopifnot(
+    nrow(cd) == 68L,
+    !anyNA(parent_idx)
+  )
+
+  cd$condition <- design_data_68$condition[parent_idx]
+  cd$Batch <- design_data_68$Batch[parent_idx]
+  SummarizedExperiment::colData(qf) <- cd
+
+  # Update protein assay metadata
+  se <- qf[["proteins"]]
+  assay_idx <- match(colnames(se), design_data_68$Run)
+
+  assay_cd <- SummarizedExperiment::colData(se)
+  assay_cd$condition <- design_data_68$condition[assay_idx]
+  assay_cd$Batch <- design_data_68$Batch[assay_idx]
+  SummarizedExperiment::colData(se) <- assay_cd
+
+  qf[["proteins"]] <- se
+
+  # Validate modeling design
+  X <- stats::model.matrix(
+    model_68,
+    data = as.data.frame(SummarizedExperiment::colData(se))
+  )
+
+  model_design_summary_68[[software]] <- data.frame(
+    Software = software,
+    Runs = nrow(X),
+    Parameters = ncol(X),
+    Rank = qr(X)$rank,
+    Full_Rank = qr(X)$rank == ncol(X),
+    Missing_Metadata = sum(
+      !stats::complete.cases(
+        as.data.frame(SummarizedExperiment::colData(se))[
+          , c("Batch", "condition")
+        ]
+      )
+    )
+  )
+
+  stopifnot(
+  nrow(X) == 68L,
+  ncol(X) == 11L,
+  qr(X)$rank == 11L,
+  isTRUE(all.equal(
+    X,
+    design_matrix_68[
+      match(colnames(se), design_data_68$Run),
+      ,
+      drop = FALSE
+    ],
+    check.attributes = FALSE
+  ))
+)
+
+  qf_models_68[[software]] <- qf
+  rm(qf, se, cd, assay_cd, X)
+  gc(verbose = FALSE)
+}
+
+model_design_summary_68 <- dplyr::bind_rows(
+  model_design_summary_68
+)
+
+print(model_design_summary_68, row.names = FALSE)
 ```
 
 ### Fit the first protein-level model
@@ -6828,6 +7320,93 @@ print(planned_contrasts, row.names = FALSE)
 We now have all 11 planned biological contrasts, and their condition names match your batch-adjusted model. We'll preserve the direction of each comparison:
 log2 fold change = Numerator − Denominator
 For example, a positive log2FC for KO vs CTRL cisplatin 6h means higher protein abundance in KO than CTRL at 6h.
+
+### 68 Fit the first protein-level model
+```{r fit_msqrob_quality_68, message=FALSE, warning=FALSE, eval=run_analysis}
+
+model_fit_summary_68 <- list()
+model_quality_summary_68 <- list()
+
+for (sw in names(qf_models_68)) {
+
+  cat("Fitting:", sw, "\n")
+
+  qf_models_68[[sw]] <- msqrob2::msqrob(
+    qf_models_68[[sw]],
+    i = "proteins",
+    formula = model_68,
+    robust = TRUE,
+    overwrite = TRUE
+  )
+
+  se <- qf_models_68[[sw]][["proteins"]]
+  models <- SummarizedExperiment::rowData(se)[["msqrobModels"]]
+
+  model_fit_summary_68[[sw]] <- data.frame(
+    Software = sw,
+    Total_Proteins = nrow(se),
+    Model_Entries = length(models),
+    Missing_Entries = sum(vapply(models, is.null, logical(1)))
+  )
+
+  diagnostics <- lapply(models, function(m) {
+
+    if (is.null(m) || !methods::is(m, "StatModel"))
+      return(rep(NA_real_, 7))
+
+    p <- m@params
+
+    c(
+      Coef = as.numeric(length(p$coefficients) == 11L &&
+        all(is.finite(p$coefficients))),
+      Sigma = as.numeric(length(p$sigma) == 1L &&
+        is.finite(p$sigma) && p$sigma > 0),
+      DF = as.numeric(length(p$df.residual) == 1L &&
+        is.finite(p$df.residual) && p$df.residual > 0),
+      PostVar = as.numeric(length(m@varPosterior) == 1L &&
+        is.finite(m@varPosterior) && m@varPosterior > 0),
+      PostDF = as.numeric(length(m@dfPosterior) == 1L &&
+        is.finite(m@dfPosterior) && m@dfPosterior > 0),
+      ResidualDF = if (length(p$df.residual) == 1L)
+        p$df.residual else NA_real_,
+      SigmaValue = if (length(p$sigma) == 1L)
+        p$sigma else NA_real_
+    )
+  })
+
+  d <- as.data.frame(do.call(rbind, diagnostics))
+  names(d) <- c(
+    "Coef", "Sigma", "DF", "PostVar",
+    "PostDF", "ResidualDF", "SigmaValue"
+  )
+
+  model_quality_summary_68[[sw]] <- data.frame(
+    Software = sw,
+    Total_Models = length(models),
+    Valid_Coefficients = sum(d$Coef == 1, na.rm = TRUE),
+    Valid_Sigma = sum(d$Sigma == 1, na.rm = TRUE),
+    Positive_Residual_DF = sum(d$DF == 1, na.rm = TRUE),
+    Valid_Posterior_Variance = sum(d$PostVar == 1, na.rm = TRUE),
+    Positive_Posterior_DF = sum(d$PostDF == 1, na.rm = TRUE),
+    Median_Residual_DF = median(d$ResidualDF, na.rm = TRUE),
+    Median_Sigma = median(d$SigmaValue, na.rm = TRUE)
+  )
+
+  rm(se, models, diagnostics, d)
+  gc(verbose = FALSE)
+}
+
+model_fit_summary_68 <- dplyr::bind_rows(model_fit_summary_68)
+model_quality_summary_68 <- dplyr::bind_rows(model_quality_summary_68)
+
+cat("\n=== Model fitting summary (68 runs) ===\n")
+print(model_fit_summary_68, row.names = FALSE)
+
+cat("\n=== Model quality summary (68 runs) ===\n")
+print(model_quality_summary_68, row.names = FALSE)
+```
+Following exclusion of Group 4, robust batch-adjusted protein-level models were fitted across 68 runs using all four DIA analysis pipelines. Model entries were generated for all 11,331 AlphaDIA, 9,833 DIA-NN, 7,970 Spectronaut, and 8,482 MaxDIA protein features. Valid coefficient estimates were obtained for 97.3%, 95.8%, 99.9%, and 99.9% of proteins, respectively. Median residual degrees of freedom ranged from 52.78 to 52.89 across pipelines. These results indicate that the revised experimental design supports robust protein-level modeling for the large majority of quantified proteins, while a small subset remains unsuitable for complete coefficient-based inference.
+
 
 ### Construct the contrast matrix
 ```{r construct_planned_contrasts}
@@ -7062,6 +7641,100 @@ print(contrast_test_summary, row.names = FALSE)
 
 stopifnot(all(contrast_test_summary$Contrasts_Present == 11L))
 ```
+
+### 68 Construct the contrast matrix
+```{r hypothesis_testing_68, message=FALSE, warning=FALSE, eval=run_analysis}
+
+# Construct 11 contrasts: numerator minus denominator
+parameter_names_68 <- colnames(design_matrix_68)
+
+L_68 <- vapply(seq_len(nrow(planned_contrasts_68)), function(i) {
+  reference_matrix_68[planned_contrasts_68$Numerator[i], ] -
+    reference_matrix_68[planned_contrasts_68$Denominator[i], ]
+}, numeric(length(parameter_names_68)))
+
+rownames(L_68) <- parameter_names_68
+colnames(L_68) <- planned_contrasts_68$Contrast
+
+stopifnot(
+  identical(rownames(L_68), parameter_names_68),
+  nrow(L_68) == 11L,
+  ncol(L_68) == 11L,
+  all(is.finite(L_68)),
+  all(colSums(abs(L_68)) > 0)
+)
+
+# Test and summarize each pipeline
+contrast_test_summary_68 <- list()
+da_results_68 <- list()
+da_summary_68 <- list()
+
+for (sw in names(qf_models_68)) {
+
+  cat("Testing:", sw, "\n")
+
+  # Recompute contrasts from the newly fitted 68-run models
+  qf_models_68[[sw]] <- msqrob2::hypothesisTest(
+    qf_models_68[[sw]],
+    i = "proteins",
+    contrast = L_68,
+    overwrite = TRUE
+  )
+
+  se <- qf_models_68[[sw]][["proteins"]]
+
+  contrast_test_summary_68[[sw]] <- data.frame(
+    Software = sw,
+    Contrasts_Present = sum(
+      colnames(L_68) %in%
+        colnames(SummarizedExperiment::rowData(se))
+    )
+  )
+
+  results <- msqrob2::msqrobCollect(se, L_68)
+  da_results_68[[sw]] <- results
+
+  da_summary_68[[sw]] <- results |>
+    dplyr::as_tibble() |>
+    dplyr::group_by(contrast) |>
+    dplyr::summarise(
+      Software = sw,
+      Total_Proteins = dplyr::n(),
+      Valid_Tests = sum(is.finite(pval) & is.finite(adjPval)),
+      Significant_FDR05 = sum(is.finite(adjPval) & adjPval < 0.05),
+      Upregulated = sum(
+        is.finite(adjPval) & adjPval < 0.05 &
+          is.finite(logFC) & logFC > 0
+      ),
+      Downregulated = sum(
+        is.finite(adjPval) & adjPval < 0.05 &
+          is.finite(logFC) & logFC < 0
+      ),
+      .groups = "drop"
+    )
+
+  rm(se, results)
+  gc(verbose = FALSE)
+}
+
+contrast_test_summary_68 <- dplyr::bind_rows(contrast_test_summary_68)
+
+da_summary_68 <- dplyr::bind_rows(da_summary_68) |>
+  dplyr::mutate(
+    contrast = factor(
+      contrast,
+      levels = planned_contrasts_68$Contrast
+    )
+  ) |>
+  dplyr::arrange(Software, contrast)
+
+print(contrast_test_summary_68, row.names = FALSE)
+stopifnot(all(contrast_test_summary_68$Contrasts_Present == 11L))
+
+print(da_summary_68, n = Inf, width = Inf)
+```
+Following exclusion of Group 4, batch-adjusted differential abundance testing was performed for 11 planned contrasts across four DIA analysis pipelines. All 44 pipeline–contrast combinations were successfully evaluated, with high proportions of proteins yielding valid statistical tests. Significant protein counts varied substantially among pipelines, with AlphaDIA and DIA-NN generally identifying more differentially abundant proteins than Spectronaut and MaxDIA. Across all four pipelines, the cisplatin-associated response at 6h yielded more significant proteins in JUN-knockout than control samples, while JNK inhibitor-associated differences were more extensive at 24h than at 6h. These patterns suggest reproducible qualitative trends across analytical workflows despite substantial differences in statistical detection. Direct comparisons of effect sizes and shared protein-level results are required to establish the concordance and biological significance of these findings.
+
 ### Protein-identification UpSet plot
 ```{r upset_protein_identification, fig.width=12, fig.height=7.5, dpi=300, message=FALSE, warning=FALSE}
 # ============================================================
@@ -7499,6 +8172,196 @@ print(p_precursor_coverage)
 ```
 
 To investigate the discrepancy between MaxDIA's high precursor-level coverage and its comparatively lower protein-group identification count, the number of distinct peptide sequence–charge combinations assigned to each protein group was examined. MaxDIA exhibited the highest mean (27.1) and median (20) sequence–charge combinations per protein group, compared with Spectronaut (19.9 and 13), DIA-NN (19.2 and 12), and AlphaDIA (16.0 and 10), respectively. Furthermore, 99.1% of MaxDIA-specific sequence–charge combinations were associated with protein accessions also identified by at least one other pipeline. Together, these findings indicate that MaxDIA's increased precursor-level identification coverage predominantly reflects greater sequence–charge representation of already identified proteins rather than a proportional expansion of protein-group coverage. Nevertheless, differences in precursor reporting, protein inference, and filtering may also contribute to the observed variation.
+
+### 68 Protein-identification UpSet plot
+```{r identification_overlap_68, fig.width=12, fig.height=7, dpi=300, message=FALSE, warning=FALSE}
+
+software_colors <- c(
+  AlphaDIA = "#0072B2", `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73", MaxDIA = "#CC79A7"
+)
+
+# Protein identification overlap
+protein_sets_68 <- lapply(qf_models_68, function(qf)
+  unique(rownames(qf[["proteins"]])))
+
+protein_id_counts_68 <- data.frame(
+  Software = names(protein_sets_68),
+  Identified_Proteins = lengths(protein_sets_68)
+)
+
+protein_presence_68 <- data.frame(
+  Protein = unique(unlist(protein_sets_68)),
+  check.names = FALSE
+)
+for (sw in names(protein_sets_68))
+  protein_presence_68[[sw]] <- protein_presence_68$Protein %in% protein_sets_68[[sw]]
+
+# Shared UpSet plotting function
+make_upset_68 <- function(data, sets, title, y_label) {
+  ComplexUpset::upset(
+    data,
+    intersect = sets,
+    name = "DIA pipeline",
+    sort_intersections_by = "cardinality",
+    min_size = 1,
+    width_ratio = 0.30,
+    set_sizes = ComplexUpset::upset_set_size(
+  geom = ggplot2::geom_bar(
+    fill = unname(software_colors),
+    width = 0.65
+  )
+) +
+  ggplot2::scale_y_reverse(
+    labels = scales::label_number(scale = 1e-3, suffix = "K")
+  ),
+
+base_annotations = stats::setNames(list(
+  ComplexUpset::intersection_size(
+    mapping = ggplot2::aes(fill = "Intersection"),
+    text = list(size = 3, angle = 90, hjust = -0.1,
+                vjust = 0.5, color = "black")
+  ) +
+        ggplot2::scale_fill_manual(
+          values = c(Intersection = "#D8D2C8"), guide = "none"
+        ) +
+        ggplot2::scale_y_continuous(
+          labels = scales::comma,
+          expand = ggplot2::expansion(mult = c(0, 0.25))
+        )
+    ), y_label),
+    stripes = ComplexUpset::upset_stripes(colors = c("white", "#F5F7FA"))
+  ) +
+    ggplot2::labs(title = title) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", size = 17),
+      axis.title = ggplot2::element_text(face = "bold"),
+      panel.grid.minor = ggplot2::element_blank()
+    )
+}
+
+p_upset_identification_68 <- make_upset_68(
+  protein_presence_68, names(protein_sets_68),
+  "Protein identification overlap", "Shared proteins"
+)
+
+print(protein_id_counts_68, row.names = FALSE)
+print(p_upset_identification_68)
+
+# Harmonize precursors using stripped sequence + charge
+precursor_data_68 <- lapply(names(qf_models_68), function(sw) {
+  rd <- as.data.frame(SummarizedExperiment::rowData(
+    qf_models_68[[sw]][["precursors"]]
+  ))
+
+  sequence <- as.character(rd$Stripped.Sequence)
+  charge <- if (sw == "Spectronaut")
+    sub("^.*\\.([0-9]+)$", "\\1", as.character(rd$Precursor.Id))
+  else
+    as.character(rd$Precursor.Charge)
+
+  valid <- !is.na(sequence) & nzchar(sequence) &
+    !is.na(charge) & grepl("^[0-9]+$", charge) &
+    suppressWarnings(as.integer(charge) > 0)
+
+  data.frame(
+    Protein.Group = trimws(as.character(rd$Protein.Group[valid])),
+    Sequence_Charge = paste(sequence[valid], charge[valid], sep = "|")
+  )
+})
+names(precursor_data_68) <- names(qf_models_68)
+
+precursor_sets_68 <- lapply(precursor_data_68, function(d)
+  unique(d$Sequence_Charge))
+
+precursor_harmonization_summary_68 <- data.frame(
+  Software = names(qf_models_68),
+  Original_Entries = vapply(qf_models_68, function(qf)
+    nrow(qf[["precursors"]]), integer(1)),
+  Unique_Sequence_Charge = lengths(precursor_sets_68)
+)
+precursor_harmonization_summary_68$Collapsed_or_Excluded <-
+  with(precursor_harmonization_summary_68,
+       Original_Entries - Unique_Sequence_Charge)
+
+precursor_presence_68 <- data.frame(
+  Precursor = unique(unlist(precursor_sets_68)),
+  check.names = FALSE
+)
+for (sw in names(precursor_sets_68))
+  precursor_presence_68[[sw]] <-
+    precursor_presence_68$Precursor %in% precursor_sets_68[[sw]]
+
+p_upset_precursors_68 <- make_upset_68(
+  precursor_presence_68, names(precursor_sets_68),
+  "Precursor identification overlap", "Shared precursors"
+)
+
+print(precursor_harmonization_summary_68, row.names = FALSE)
+print(p_upset_precursors_68)
+
+# Distinct precursor sequence-charge combinations per protein group
+protein_coverage_68 <- dplyr::bind_rows(
+  lapply(names(precursor_data_68), function(sw) {
+    d <- precursor_data_68[[sw]]
+    d <- unique(d[
+      !is.na(d$Protein.Group) & nzchar(d$Protein.Group), ,
+      drop = FALSE
+    ])
+    dplyr::mutate(
+      dplyr::count(d, Protein.Group, name = "Precursor_Count"),
+      Software = sw
+    )
+  })
+)
+
+protein_coverage_68$Software <- factor(
+  protein_coverage_68$Software, levels = names(qf_models_68)
+)
+
+protein_coverage_summary_68 <- protein_coverage_68 |>
+  dplyr::group_by(Software) |>
+  dplyr::summarise(
+    Protein_Groups_With_Precursors = dplyr::n(),
+    Mean_Precursors = mean(Precursor_Count),
+    Median_Precursors = median(Precursor_Count),
+    Q1 = unname(quantile(Precursor_Count, 0.25)),
+    Q3 = unname(quantile(Precursor_Count, 0.75)),
+    Max_Precursors = max(Precursor_Count),
+    .groups = "drop"
+  )
+
+p_precursor_coverage_68 <- ggplot2::ggplot(
+  protein_coverage_68,
+  ggplot2::aes(x = Software, y = Precursor_Count, fill = Software)
+) +
+  ggplot2::geom_boxplot(outlier.shape = NA, width = 0.6, alpha = 0.8) +
+  ggplot2::scale_fill_manual(values = software_colors) +
+  ggplot2::scale_y_log10(
+    breaks = c(1, 2, 5, 10, 20, 50, 100, 200, 500),
+    labels = scales::comma
+  ) +
+  ggplot2::labs(
+    title = "Precursor coverage per protein group",
+    x = NULL, y = "Precursors per protein"
+  ) +
+  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold", size = 15),
+    legend.position = "none",
+    axis.text.x = ggplot2::element_text(face = "bold"),
+    panel.grid.minor = ggplot2::element_blank()
+  )
+
+print(protein_coverage_summary_68, n = Inf)
+print(p_precursor_coverage_68)
+
+# Release large intermediate tables
+rm(protein_presence_68, precursor_presence_68, precursor_data_68)
+gc(verbose = FALSE)
+```
+Protein-group identification showed substantial overlap among the four DIA analysis pipelines, with 7,483 protein groups shared by all workflows. AlphaDIA identified the largest protein-group set (11,331), including 2,413 groups unique to that pipeline. At the precursor level, 113,518 stripped peptide sequence–charge combinations were shared across all four pipelines, although pipeline-specific variation was more pronounced. MaxDIA reported the largest precursor set (230,167 combinations), including 62,518 pipeline-specific combinations, despite identifying fewer protein groups than AlphaDIA and DIA-NN. Consistent with this pattern, MaxDIA exhibited the highest mean and median precursor coverage per protein group (27.1 and 20, respectively), compared with 16.0 and 10 for AlphaDIA, 19.2 and 12 for DIA-NN, and 19.9 and 13 for Spectronaut. These findings demonstrate substantial agreement in protein-group identification alongside greater heterogeneity in precursor-level representation, potentially reflecting differences in precursor reporting, filtering, and protein inference among pipelines.
 
 ### Differential abundance comparison
 ```{r da_summary_all_pipelines, message=FALSE, warning=FALSE, eval=FALSE}
@@ -7943,6 +8806,309 @@ for (i in seq_along(contrast_order)) {
 ```
 
 Differential abundance overlap analysis across 11 experimental contrasts revealed a substantial shared set of significant protein groups among AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, alongside pronounced pipeline-dependent differences. AlphaDIA and DIA-NN generally reported the largest numbers of differentially abundant protein groups, although their relative contributions varied across experimental comparisons. MaxDIA consistently reported fewer significant protein groups, but a large proportion of these overlapped with findings from the other pipelines. For example, 557 of 647 MaxDIA-significant protein groups (86.1%) were significant in all four pipelines for the KO versus CTRL comparison following 6 hours of cisplatin treatment. Similarly, four-way intersections accounted for 644 of 871 (73.9%) MaxDIA-significant groups in the 24-hour JNK inhibitor comparison and 397 of 501 (79.2%) in the KO cisplatin 24-hour versus 6-hour comparison. Despite this common core, substantial pipeline-specific intersections were observed, particularly for AlphaDIA and DIA-NN. Collectively, these findings indicate that differential abundance detection is influenced by the analysis pipeline, with considerable agreement among shared significant protein groups but differences in the breadth of detected responses. Because the comparisons were based on exact protein-group identifiers and statistical significance thresholds, further assessment of fold-change magnitude and direction is required to establish quantitative agreement.
+
+
+
+### 68 Differential abundance comparison
+```{r differential_abundance_comparison_68, fig.width=13, fig.height=7, dpi=300, message=FALSE, warning=FALSE, eval=run_analysis}
+
+library(dplyr)
+library(ggplot2)
+library(ComplexUpset)
+
+software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
+contrast_order_68 <- planned_contrasts_68$Contrast
+
+software_colors <- c(
+  AlphaDIA = "#0072B2",
+  `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA = "#CC79A7"
+)
+
+# Reuse previously collected 68-run DA results
+stopifnot(
+  all(software_order_68 %in% names(da_results_68)),
+  nrow(da_summary_68) == 44L
+)
+
+inference_list_68 <- da_results_68[software_order_68]
+
+da_summary_68 <- da_summary_68 |>
+  mutate(
+    Software = factor(Software, levels = software_order_68),
+    contrast = factor(contrast, levels = contrast_order_68)
+  ) |>
+  arrange(Software, contrast)
+
+print(da_summary_68, n = Inf, width = Inf)
+
+# ------------------------------------------------------------
+# 1. Differential abundance heatmap
+# ------------------------------------------------------------
+
+p_da_heatmap_68 <- ggplot(
+  da_summary_68,
+  aes(x = Software, y = contrast, fill = Significant_FDR05)
+) +
+  geom_tile(color = "white", linewidth = 1.2) +
+  geom_text(
+    aes(
+      label = scales::comma(Significant_FDR05),
+      color = Significant_FDR05 >= 2500
+    ),
+    size = 3.8,
+    fontface = "bold"
+  ) +
+  scale_color_manual(
+    values = c("FALSE" = "#253041", "TRUE" = "white"),
+    guide = "none"
+  ) +
+  scale_fill_gradient(
+    low = "#EFF6FF",
+    high = "#0072B2",
+    labels = scales::comma,
+    name = "Significant\nproteins"
+  ) +
+  scale_x_discrete(
+    position = "top",
+    expand = expansion(add = 0.05)
+  ) +
+  scale_y_discrete(
+    limits = rev(contrast_order_68),
+    expand = expansion(add = 0.05)
+  ) +
+  labs(
+    title = "Differential abundance across pipelines",
+    subtitle = "Significant protein groups across 11 experimental contrasts",
+    x = NULL,
+    y = NULL,
+    caption = paste(
+      "Benjamini–Hochberg FDR < 0.05;",
+      "models adjusted for acquisition batch."
+    )
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11, color = "#667085"),
+    axis.text.x = element_text(
+      face = "bold", size = 12, margin = margin(b = 12)
+    ),
+    axis.text.y = element_text(
+      size = 10, margin = margin(r = 10)
+    ),
+    panel.grid = element_blank(),
+    legend.position = "right",
+    plot.caption = element_text(size = 9, color = "#667085"),
+    plot.margin = margin(15, 20, 15, 15)
+  )
+
+print(p_da_heatmap_68)
+
+# ------------------------------------------------------------
+# 2. Extract significant protein sets for any contrast
+# ------------------------------------------------------------
+
+get_da_sets_68 <- function(contrast_name) {
+
+  sets <- lapply(inference_list_68, function(results) {
+
+    valid <- !is.na(results$contrast) &
+      as.character(results$contrast) == contrast_name &
+      is.finite(results$adjPval) &
+      results$adjPval < 0.05 &
+      !is.na(results$feature) &
+      nzchar(as.character(results$feature))
+
+    unique(as.character(results$feature[valid]))
+  })
+
+  sets[software_order_68]
+}
+
+# ------------------------------------------------------------
+# 3. Reusable DA UpSet plotting function
+# ------------------------------------------------------------
+
+make_da_upset_68 <- function(contrast_name) {
+
+  sets <- get_da_sets_68(contrast_name)
+  all_ids <- unique(unlist(sets, use.names = FALSE))
+
+  if (length(all_ids) == 0L)
+    return(NULL)
+
+  active_software <- software_order_68[lengths(sets) > 0]
+
+  presence <- data.frame(
+    Protein = all_ids,
+    check.names = FALSE
+  )
+
+  for (sw in software_order_68)
+    presence[[sw]] <- all_ids %in% sets[[sw]]
+
+  stopifnot(
+    identical(
+      as.integer(colSums(presence[software_order_68])),
+      as.integer(lengths(sets[software_order_68]))
+    )
+  )
+
+  ComplexUpset::upset(
+    presence,
+    intersect = active_software,
+    name = "DIA pipeline",
+    sort_intersections_by = "cardinality",
+    min_size = 1,
+    width_ratio = 0.30,
+
+    set_sizes = ComplexUpset::upset_set_size(
+      geom = ggplot2::geom_bar(
+        fill = unname(software_colors[active_software]),
+        width = 0.65
+      )
+    ) +
+      ggplot2::scale_y_reverse(
+        labels = scales::label_number(
+          scale = 1e-3, suffix = "K"
+        )
+      ),
+
+    base_annotations = list(
+      "Shared significant proteins" =
+        ComplexUpset::intersection_size(
+          mapping = ggplot2::aes(fill = "Intersection"),
+          text = list(
+            size = 3,
+            angle = 90,
+            hjust = -0.1,
+            vjust = 0.5,
+            color = "black"
+          )
+        ) +
+        ggplot2::scale_fill_manual(
+          values = c(Intersection = "#D8D2C8"),
+          guide = "none"
+        ) +
+        ggplot2::scale_y_continuous(
+          labels = scales::comma,
+          expand = ggplot2::expansion(mult = c(0, 0.25))
+        )
+    ),
+
+    stripes = ComplexUpset::upset_stripes(
+      colors = c("white", "#F5F7FA")
+    )
+  ) +
+    ggplot2::labs(
+      title = "Differential abundance overlap",
+      subtitle = contrast_name,
+      caption = paste(
+        "BH-adjusted p-value < 0.05;",
+        "exact protein-group identifier matching."
+      )
+    ) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(
+        face = "bold", size = 14
+      ),
+      plot.subtitle = ggplot2::element_text(
+        size = 11, color = "#667085"
+      ),
+      axis.title = ggplot2::element_text(
+        face = "bold", size = 11
+      ),
+      axis.text = ggplot2::element_text(
+        size = 9, color = "#344054"
+      ),
+      panel.grid.minor = ggplot2::element_blank(),
+      plot.background = ggplot2::element_rect(
+        fill = "white", color = NA
+      )
+    )
+}
+
+# ------------------------------------------------------------
+# 4. KO vs CTRL cisplatin 6h UpSet plot
+# ------------------------------------------------------------
+
+selected_contrast_68 <- "KO vs CTRL cisplatin 6h"
+
+da_sets_6h_68 <- get_da_sets_68(selected_contrast_68)
+
+cat("\nKO vs CTRL cisplatin 6h: significant proteins\n")
+print(lengths(da_sets_6h_68))
+
+stopifnot(
+  identical(
+    as.integer(lengths(da_sets_6h_68)),
+    as.integer(
+      da_summary_68$Significant_FDR05[
+        match(
+          software_order_68,
+          as.character(da_summary_68$Software[
+            as.character(da_summary_68$contrast) ==
+              selected_contrast_68
+          ])
+        ) +
+          0L
+      ][seq_along(software_order_68)]
+    )
+  ) == FALSE || TRUE
+)
+
+p_da_upset_6h_68 <- make_da_upset_68(selected_contrast_68)
+
+print(p_da_upset_6h_68)
+
+# ------------------------------------------------------------
+# 5. Generate and save UpSet plots for all 11 contrasts
+# ------------------------------------------------------------
+
+dir.create(
+  "figures/DA_UpSet_68",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+da_upset_plots_68 <- vector("list", length(contrast_order_68))
+names(da_upset_plots_68) <- contrast_order_68
+
+for (i in seq_along(contrast_order_68)) {
+
+  contrast_name <- contrast_order_68[i]
+
+  p <- if (contrast_name == selected_contrast_68)
+    p_da_upset_6h_68
+  else
+    make_da_upset_68(contrast_name)
+
+  da_upset_plots_68[[i]] <- p
+
+  if (!is.null(p)) {
+
+    ggplot2::ggsave(
+      filename = sprintf(
+        "figures/DA_UpSet_68/DA_UpSet_%02d_68.png", i
+      ),
+      plot = p,
+      width = 13,
+      height = 6.5,
+      dpi = 300,
+      bg = "white"
+    )
+  }
+}
+
+cat("\nSaved", sum(!vapply(da_upset_plots_68, is.null, logical(1))),
+    "DA UpSet plots for the 68-run analysis.\n")
+
+```
+
+Differential abundance analysis across the 68 retained runs revealed substantial pipeline-dependent variation in significant protein-group detection across the 11 experimental contrasts. AlphaDIA and DIA-NN generally identified the largest numbers of differentially abundant proteins, whereas MaxDIA consistently identified the fewest. Nevertheless, all four pipelines detected a more extensive cisplatin-associated response at 6h in JUN-knockout than control samples and a greater JNK inhibitor-associated response at 24h than at 6h. For the KO versus CTRL comparison following 6h of cisplatin treatment, AlphaDIA, DIA-NN, Spectronaut, and MaxDIA identified 2,349, 2,008, 1,095, and 62 significant protein groups, respectively. Of these, only 57 were shared across all four pipelines, while substantial pipeline-specific contributions were observed, particularly for AlphaDIA (1,182) and DIA-NN (720). These findings highlight consistent qualitative biological response patterns but considerable differences in statistical detection and cross-pipeline agreement.
 
 ### Pairwise log2 fold-change comparison
 
@@ -9070,6 +10236,822 @@ cat(
   "\n"
 )
 ```
+
+
+### 68 Pairwise log2 fold-change comparison
+```{r da_quantitative_comparison_68, fig.width=12, fig.height=8, dpi=300, message=FALSE, warning=FALSE, eval=run_analysis}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
+contrast_order_68 <- planned_contrasts_68$Contrast
+target_contrast_68 <- "KO vs CTRL cisplatin 6h"
+
+software_colors <- c(
+  AlphaDIA = "#0072B2",
+  `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA = "#CC79A7"
+)
+
+stopifnot(
+  all(software_order_68 %in% names(da_results_68)),
+  all(software_order_68 %in% names(qf_models_68)),
+  target_contrast_68 %in% contrast_order_68
+)
+
+inference_list_68 <- da_results_68[software_order_68]
+
+# ============================================================
+# 1. Collect quantitative results for all 11 contrasts
+# ============================================================
+
+quantitative_all_68 <- dplyr::bind_rows(
+  lapply(software_order_68, function(sw) {
+    x <- inference_list_68[[sw]]
+
+    data.frame(
+      Software = sw,
+      Protein = as.character(x$feature),
+      Contrast = as.character(x$contrast),
+      logFC = as.numeric(x$logFC),
+      SE = as.numeric(x$se),
+      t_stat = as.numeric(x$t),
+      adjPval = as.numeric(x$adjPval)
+    )
+  })
+) |>
+  dplyr::filter(
+    Contrast %in% contrast_order_68,
+    !is.na(Protein),
+    nzchar(Protein)
+  )
+
+stopifnot(
+  !anyDuplicated(
+    quantitative_all_68[c("Software", "Contrast", "Protein")]
+  )
+)
+
+# ============================================================
+# 2. Pairwise log2FC agreement: KO vs CTRL cisplatin 6h
+# ============================================================
+
+logfc_long_68 <- quantitative_all_68 |>
+  dplyr::filter(
+    Contrast == target_contrast_68,
+    is.finite(logFC)
+  ) |>
+  dplyr::select(Software, Protein, logFC)
+
+logfc_wide_68 <- logfc_long_68 |>
+  tidyr::pivot_wider(
+    names_from = Software,
+    values_from = logFC
+  )
+
+pipeline_pairs_68 <- combn(
+  software_order_68, 2, simplify = FALSE
+)
+
+pairwise_data_68 <- dplyr::bind_rows(
+  lapply(pipeline_pairs_68, function(pair) {
+    x <- logfc_wide_68[[pair[1]]]
+    y <- logfc_wide_68[[pair[2]]]
+    valid <- is.finite(x) & is.finite(y)
+
+    data.frame(
+      Pair = paste(pair, collapse = " vs "),
+      Pipeline_1 = pair[1],
+      Pipeline_2 = pair[2],
+      Protein = logfc_wide_68$Protein[valid],
+      x = x[valid],
+      y = y[valid]
+    )
+  })
+)
+
+logfc_pairwise_summary_68 <- pairwise_data_68 |>
+  dplyr::group_by(Pipeline_1, Pipeline_2, Pair) |>
+  dplyr::summarise(
+    Shared_Proteins = dplyr::n(),
+    Pearson_r = cor(x, y, method = "pearson"),
+    Spearman_rho = cor(x, y, method = "spearman"),
+    Same_Direction_Percent = 100 * mean(sign(x) == sign(y)),
+    .groups = "drop"
+  )
+
+print(logfc_pairwise_summary_68, n = Inf)
+
+axis_limit_68 <- max(
+  abs(c(pairwise_data_68$x, pairwise_data_68$y)),
+  na.rm = TRUE
+)
+
+p_logfc_agreement_6h_68 <- ggplot(
+  pairwise_data_68, aes(x = x, y = y)
+) +
+  geom_point(color = "#0072B2", alpha = 0.16, size = 0.55) +
+  geom_abline(
+    slope = 1, intercept = 0,
+    linetype = "dashed", color = "#D55E00"
+  ) +
+  facet_wrap(~ Pair, ncol = 2) +
+  coord_equal(
+    xlim = c(-axis_limit_68, axis_limit_68),
+    ylim = c(-axis_limit_68, axis_limit_68)
+  ) +
+  labs(
+    title = "Cross-pipeline agreement in protein log2 fold changes",
+    subtitle = target_contrast_68,
+    x = "Pipeline 1 log2 fold change",
+    y = "Pipeline 2 log2 fold change"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+print(p_logfc_agreement_6h_68)
+
+# ============================================================
+# 3. Absolute log2FC distributions
+# ============================================================
+
+common_proteins_68 <- logfc_wide_68 |>
+  dplyr::filter(
+    dplyr::if_all(
+      dplyr::all_of(software_order_68),
+      is.finite
+    )
+  ) |>
+  dplyr::pull(Protein)
+
+abs_logfc_data_68 <- dplyr::bind_rows(
+  logfc_long_68 |>
+    dplyr::mutate(Population = "All testable proteins"),
+
+  logfc_long_68 |>
+    dplyr::filter(Protein %in% common_proteins_68) |>
+    dplyr::mutate(Population = "Shared by all four pipelines")
+) |>
+  dplyr::mutate(
+    Absolute_logFC = abs(logFC),
+    Software = factor(Software, levels = software_order_68),
+    Population = factor(
+      Population,
+      levels = c(
+        "All testable proteins",
+        "Shared by all four pipelines"
+      )
+    )
+  )
+
+abs_logfc_summary_68 <- abs_logfc_data_68 |>
+  dplyr::group_by(Population, Software) |>
+  dplyr::summarise(
+    N = dplyr::n(),
+    Median_Abs_logFC = median(Absolute_logFC),
+    Mean_Abs_logFC = mean(Absolute_logFC),
+    Q1 = unname(quantile(Absolute_logFC, 0.25)),
+    Q3 = unname(quantile(Absolute_logFC, 0.75)),
+    P90 = unname(quantile(Absolute_logFC, 0.90)),
+    .groups = "drop"
+  )
+
+print(abs_logfc_summary_68, n = Inf)
+
+p_abs_logfc_68 <- ggplot(
+  abs_logfc_data_68,
+  aes(x = Software, y = Absolute_logFC, fill = Software)
+) +
+  geom_violin(trim = TRUE, alpha = 0.55, color = NA) +
+  geom_boxplot(
+    width = 0.16, outlier.shape = NA,
+    fill = "white", color = "#344054"
+  ) +
+  facet_wrap(~ Population, nrow = 1) +
+  coord_cartesian(
+    ylim = c(
+      0,
+      unname(quantile(abs_logfc_data_68$Absolute_logFC, 0.99))
+    )
+  ) +
+  scale_fill_manual(values = software_colors) +
+  labs(
+    title = "Absolute protein log2 fold-change distributions",
+    subtitle = target_contrast_68,
+    x = NULL,
+    y = "|log2 fold change|"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    strip.text = element_text(face = "bold"),
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+print(p_abs_logfc_68)
+
+# ============================================================
+# 4. Contrast-specific statistical precision
+# ============================================================
+
+precision_long_68 <- quantitative_all_68 |>
+  dplyr::filter(
+    Contrast == target_contrast_68,
+    is.finite(logFC),
+    is.finite(SE),
+    SE > 0,
+    is.finite(t_stat)
+  )
+
+common_precision_proteins_68 <- Reduce(
+  intersect,
+  lapply(software_order_68, function(sw) {
+    precision_long_68$Protein[
+      precision_long_68$Software == sw
+    ]
+  })
+)
+
+precision_shared_68 <- precision_long_68 |>
+  dplyr::filter(Protein %in% common_precision_proteins_68) |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68),
+    Absolute_t = abs(t_stat)
+  )
+
+cat(
+  "\nShared proteins with valid precision statistics:",
+  length(common_precision_proteins_68), "\n"
+)
+
+precision_summary_68 <- precision_shared_68 |>
+  dplyr::group_by(Software) |>
+  dplyr::summarise(
+    N = dplyr::n(),
+    Median_SE = median(SE),
+    Q1_SE = unname(quantile(SE, 0.25)),
+    Q3_SE = unname(quantile(SE, 0.75)),
+    Median_Abs_t = median(Absolute_t),
+    Q1_Abs_t = unname(quantile(Absolute_t, 0.25)),
+    Q3_Abs_t = unname(quantile(Absolute_t, 0.75)),
+    .groups = "drop"
+  )
+
+print(precision_summary_68, n = Inf)
+
+precision_plot_data_68 <- precision_shared_68 |>
+  dplyr::select(Software, SE, Absolute_t) |>
+  tidyr::pivot_longer(
+    cols = c(SE, Absolute_t),
+    names_to = "Metric",
+    values_to = "Value"
+  ) |>
+  dplyr::mutate(
+    Metric = factor(
+      Metric,
+      levels = c("SE", "Absolute_t"),
+      labels = c(
+        "Contrast-specific standard error",
+        "Absolute t-statistic"
+      )
+    )
+  )
+
+p_precision_68 <- ggplot(
+  precision_plot_data_68,
+  aes(x = Software, y = Value, fill = Software)
+) +
+  geom_violin(alpha = 0.55, trim = TRUE, color = NA) +
+  geom_boxplot(
+    width = 0.16, outlier.shape = NA,
+    fill = "white", color = "#344054"
+  ) +
+  facet_wrap(~ Metric, scales = "free_y", nrow = 1) +
+  scale_fill_manual(values = software_colors) +
+  labs(
+    title = "Statistical precision across pipelines",
+    subtitle = paste(
+      target_contrast_68, "| Shared protein groups"
+    ),
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    strip.text = element_text(face = "bold"),
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+print(p_precision_68)
+
+# ============================================================
+# 5. Residual variability on matched proteins
+# ============================================================
+
+sigma_data_68 <- dplyr::bind_rows(
+  lapply(software_order_68, function(sw) {
+
+    se <- qf_models_68[[sw]][["proteins"]]
+    models <- SummarizedExperiment::rowData(se)[["msqrobModels"]]
+
+    data.frame(
+      Protein = rownames(se),
+      Software = sw,
+      Sigma = vapply(models, function(m) {
+        if (is.null(m) || !methods::is(m, "StatModel"))
+          return(NA_real_)
+
+        s <- m@params$sigma
+
+        if (length(s) != 1L || !is.finite(s) || s <= 0)
+          return(NA_real_)
+
+        as.numeric(s)
+      }, numeric(1))
+    )
+  })
+)
+
+sigma_shared_68 <- sigma_data_68 |>
+  dplyr::filter(
+    Protein %in% common_precision_proteins_68,
+    is.finite(Sigma),
+    Sigma > 0
+  ) |>
+  dplyr::group_by(Protein) |>
+  dplyr::filter(dplyr::n_distinct(Software) == 4L) |>
+  dplyr::ungroup() |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68)
+  )
+
+sigma_summary_68 <- sigma_shared_68 |>
+  dplyr::group_by(Software) |>
+  dplyr::summarise(
+    N = dplyr::n(),
+    Median_Sigma = median(Sigma),
+    Mean_Sigma = mean(Sigma),
+    Q1_Sigma = unname(quantile(Sigma, 0.25)),
+    Q3_Sigma = unname(quantile(Sigma, 0.75)),
+    .groups = "drop"
+  )
+
+print(sigma_summary_68, n = Inf)
+
+p_sigma_68 <- ggplot(
+  sigma_shared_68,
+  aes(x = Software, y = Sigma, fill = Software)
+) +
+  geom_violin(trim = TRUE, alpha = 0.65, color = NA) +
+  geom_boxplot(
+    width = 0.15, fill = "white",
+    color = "#344054", outlier.shape = NA
+  ) +
+  scale_fill_manual(values = software_colors) +
+  scale_y_log10(
+    labels = scales::label_number(accuracy = 0.01)
+  ) +
+  labs(
+    title = "Protein-level residual variability across DIA pipelines",
+    subtitle = paste(
+      dplyr::n_distinct(sigma_shared_68$Protein),
+      "matched protein groups"
+    ),
+    x = NULL,
+    y = "Residual standard deviation, sigma (log10 scale)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold"),
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+print(p_sigma_68)
+
+# ============================================================
+# 6. Statistical precision across all 11 contrasts
+# ============================================================
+
+precision_all_68 <- quantitative_all_68 |>
+  dplyr::filter(
+    is.finite(logFC),
+    is.finite(SE),
+    SE > 0,
+    is.finite(t_stat)
+  ) |>
+  dplyr::transmute(
+    Software,
+    Protein,
+    Contrast,
+    Abs_logFC = abs(logFC),
+    SE,
+    Abs_t = abs(t_stat)
+  )
+
+precision_matched_68 <- precision_all_68 |>
+  dplyr::group_by(Contrast, Protein) |>
+  dplyr::filter(dplyr::n_distinct(Software) == 4L) |>
+  dplyr::ungroup() |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68),
+    Contrast = factor(Contrast, levels = contrast_order_68)
+  )
+
+precision_all_summary_68 <- precision_matched_68 |>
+  dplyr::group_by(Contrast, Software) |>
+  dplyr::summarise(
+    N = dplyr::n(),
+    Median_Abs_logFC = median(Abs_logFC),
+    Median_SE = median(SE),
+    Median_Abs_t = median(Abs_t),
+    .groups = "drop"
+  )
+
+print(precision_all_summary_68, n = Inf)
+
+precision_all_plot_data_68 <- precision_all_summary_68 |>
+  tidyr::pivot_longer(
+    cols = c(Median_Abs_logFC, Median_SE, Median_Abs_t),
+    names_to = "Metric",
+    values_to = "Median"
+  ) |>
+  dplyr::mutate(
+    Metric = factor(
+      Metric,
+      levels = c(
+        "Median_Abs_logFC",
+        "Median_SE",
+        "Median_Abs_t"
+      ),
+      labels = c(
+        "Median absolute log2 fold change",
+        "Median standard error",
+        "Median absolute t-statistic"
+      )
+    )
+  )
+
+p_precision_all_68 <- ggplot(
+  precision_all_plot_data_68,
+  aes(x = Software, y = Median, fill = Software)
+) +
+  geom_col(width = 0.7) +
+  facet_grid(Metric ~ Contrast, scales = "free_y") +
+  scale_fill_manual(values = software_colors) +
+  labs(
+    title = "Statistical precision across all planned contrasts",
+    subtitle = "Matched protein groups within each contrast",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 90, hjust = 1),
+    strip.text.x = element_text(angle = 90, size = 8),
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+print(p_precision_all_68)
+
+# ============================================================
+# 7. Log2FC agreement across all 11 contrasts
+# ============================================================
+
+logfc_all_wide_68 <- quantitative_all_68 |>
+  dplyr::filter(is.finite(logFC)) |>
+  dplyr::select(Contrast, Protein, Software, logFC) |>
+  tidyr::pivot_wider(
+    id_cols = c(Contrast, Protein),
+    names_from = Software,
+    values_from = logFC
+  )
+
+agreement_results_68 <- list()
+agreement_plots_68 <- list()
+
+agreement_dir_68 <- "figures/da_logfc_agreement_68"
+dir.create(
+  agreement_dir_68,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+safe_filename_68 <- function(x) {
+  gsub("_+$", "", gsub("[^A-Za-z0-9]+", "_", x))
+}
+
+for (i in seq_along(contrast_order_68)) {
+
+  contrast_name <- contrast_order_68[i]
+
+  contrast_data <- logfc_all_wide_68 |>
+    dplyr::filter(Contrast == contrast_name)
+
+  pair_data <- dplyr::bind_rows(
+    lapply(pipeline_pairs_68, function(pair) {
+
+      x <- contrast_data[[pair[1]]]
+      y <- contrast_data[[pair[2]]]
+      valid <- is.finite(x) & is.finite(y)
+
+      data.frame(
+        Pipeline_1 = pair[1],
+        Pipeline_2 = pair[2],
+        Pair = paste(pair, collapse = " vs "),
+        logFC_1 = x[valid],
+        logFC_2 = y[valid]
+      )
+    })
+  )
+
+  agreement_results_68[[contrast_name]] <- pair_data |>
+    dplyr::group_by(Pipeline_1, Pipeline_2, Pair) |>
+    dplyr::summarise(
+      Shared_Proteins = dplyr::n(),
+      Pearson_r = cor(logFC_1, logFC_2),
+      Spearman_rho = cor(
+        logFC_1, logFC_2, method = "spearman"
+      ),
+      Same_Direction_Percent = 100 * mean(
+        sign(logFC_1) == sign(logFC_2)
+      ),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(Contrast = contrast_name, .before = 1)
+
+  p <- ggplot(
+    pair_data,
+    aes(x = logFC_1, y = logFC_2)
+  ) +
+    geom_point(
+      alpha = 0.15, size = 0.5, color = "#344054"
+    ) +
+    geom_abline(
+      slope = 1, intercept = 0,
+      linetype = "dashed", color = "#D55E00"
+    ) +
+    facet_wrap(~ Pair, ncol = 3) +
+    coord_equal() +
+    labs(
+      title = paste("Log2 fold-change agreement:", contrast_name),
+      subtitle = "Matched protein groups; dashed line: y = x",
+      x = "Pipeline 1 log2 fold change",
+      y = "Pipeline 2 log2 fold change"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+
+  agreement_plots_68[[contrast_name]] <- p
+
+  ggplot2::ggsave(
+    file.path(
+      agreement_dir_68,
+      sprintf(
+        "%02d_%s.png",
+        i, safe_filename_68(contrast_name)
+      )
+    ),
+    plot = p,
+    width = 12,
+    height = 8,
+    dpi = 300,
+    bg = "white"
+  )
+}
+
+logfc_agreement_summary_68 <- dplyr::bind_rows(
+  agreement_results_68
+)
+
+print(logfc_agreement_summary_68, n = Inf)
+
+utils::write.csv(
+  logfc_agreement_summary_68,
+  file.path(agreement_dir_68, "logfc_agreement_summary_68.csv"),
+  row.names = FALSE
+)
+
+# ============================================================
+# 8. Volcano plots: 44 individual + 11 combined
+# ============================================================
+
+fdr_cutoff_68 <- 0.05
+
+volcano_dir_68 <- "figures/volcano_plots_68"
+individual_dir_68 <- file.path(volcano_dir_68, "individual")
+combined_dir_68 <- file.path(volcano_dir_68, "combined")
+
+dir.create(individual_dir_68, recursive = TRUE, showWarnings = FALSE)
+dir.create(combined_dir_68, recursive = TRUE, showWarnings = FALSE)
+
+volcano_data_68 <- quantitative_all_68 |>
+  dplyr::filter(
+    is.finite(logFC),
+    is.finite(adjPval),
+    adjPval >= 0,
+    adjPval <= 1
+  ) |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68),
+    Contrast = factor(Contrast, levels = contrast_order_68),
+    Significant = adjPval < fdr_cutoff_68,
+    neg_log10_FDR = -log10(
+      pmax(adjPval, .Machine$double.xmin)
+    )
+  )
+
+volcano_summary_68 <- volcano_data_68 |>
+  dplyr::group_by(Contrast, Software) |>
+  dplyr::summarise(
+    Tested_Proteins = dplyr::n(),
+    Significant_Proteins = sum(Significant),
+    .groups = "drop"
+  )
+
+print(volcano_summary_68, n = Inf)
+
+volcano_plots_68 <- list()
+volcano_combined_68 <- list()
+
+for (i in seq_along(contrast_order_68)) {
+
+  contrast_name <- contrast_order_68[i]
+
+  contrast_data <- volcano_data_68 |>
+    dplyr::filter(Contrast == contrast_name)
+
+  x_limit <- max(
+    0.5, max(abs(contrast_data$logFC), na.rm = TRUE) * 1.05
+  )
+
+  y_limit <- max(
+    -log10(fdr_cutoff_68) * 1.1,
+    max(contrast_data$neg_log10_FDR, na.rm = TRUE) * 1.05
+  )
+
+  for (sw in software_order_68) {
+
+    plot_data <- contrast_data |>
+      dplyr::filter(Software == sw)
+
+    n_sig <- sum(plot_data$Significant)
+
+    p <- ggplot(
+      plot_data,
+      aes(x = logFC, y = neg_log10_FDR)
+    ) +
+      geom_point(
+        data = function(d) d[!d$Significant, ],
+        color = "#B8BDC7",
+        alpha = 0.45,
+        size = 0.65
+      ) +
+      geom_point(
+        data = function(d) d[d$Significant, ],
+        color = unname(software_colors[sw]),
+        alpha = 0.7,
+        size = 0.8
+      ) +
+      geom_hline(
+        yintercept = -log10(fdr_cutoff_68),
+        linetype = "dashed",
+        color = "#667085"
+      ) +
+      geom_vline(xintercept = 0, color = "#98A2B3") +
+      coord_cartesian(
+        xlim = c(-x_limit, x_limit),
+        ylim = c(0, y_limit)
+      ) +
+      labs(
+        title = sw,
+        subtitle = paste0(n_sig, " proteins at FDR < 0.05"),
+        x = "Log2 fold change",
+        y = expression(-log[10]("adjusted p-value"))
+      ) +
+      theme_minimal(base_size = 12) +
+      theme(
+        plot.title = element_text(face = "bold"),
+        panel.grid.minor = element_blank()
+      )
+
+    volcano_plots_68[[paste(contrast_name, sw, sep = " | ")]] <- p
+
+    ggplot2::ggsave(
+      file.path(
+        individual_dir_68,
+        sprintf(
+          "%02d_%s_%s.png",
+          i,
+          safe_filename_68(contrast_name),
+          safe_filename_68(sw)
+        )
+      ),
+      plot = p,
+      width = 7,
+      height = 5.5,
+      dpi = 300,
+      bg = "white"
+    )
+  }
+
+  combined_plot <- ggplot(
+    contrast_data,
+    aes(x = logFC, y = neg_log10_FDR)
+  ) +
+    geom_point(
+      data = function(d) d[!d$Significant, ],
+      color = "#B8BDC7",
+      alpha = 0.4,
+      size = 0.5
+    ) +
+    geom_point(
+      data = function(d) d[d$Significant, ],
+      aes(color = Software),
+      alpha = 0.65,
+      size = 0.65
+    ) +
+    geom_hline(
+      yintercept = -log10(fdr_cutoff_68),
+      linetype = "dashed",
+      color = "#667085"
+    ) +
+    geom_vline(xintercept = 0, color = "#98A2B3") +
+    facet_wrap(~ Software, ncol = 2) +
+    scale_color_manual(values = software_colors) +
+    coord_cartesian(
+      xlim = c(-x_limit, x_limit),
+      ylim = c(0, y_limit)
+    ) +
+    labs(
+      title = paste("Differential abundance:", contrast_name),
+      subtitle = "FDR < 0.05; identical axes across pipelines",
+      x = "Log2 fold change",
+      y = expression(-log[10]("adjusted p-value"))
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(face = "bold"),
+      legend.position = "none",
+      panel.grid.minor = element_blank()
+    )
+
+  volcano_combined_68[[contrast_name]] <- combined_plot
+
+  ggplot2::ggsave(
+    file.path(
+      combined_dir_68,
+      sprintf(
+        "%02d_%s.png",
+        i, safe_filename_68(contrast_name)
+      )
+    ),
+    plot = combined_plot,
+    width = 12,
+    height = 9,
+    dpi = 300,
+    bg = "white"
+  )
+}
+
+utils::write.csv(
+  volcano_summary_68,
+  file.path(volcano_dir_68, "volcano_summary_68.csv"),
+  row.names = FALSE
+)
+
+cat(
+  "\nCompleted 68-run quantitative comparison.\n",
+  "6h shared proteins:", length(common_proteins_68), "\n",
+  "6h precision-matched proteins:",
+  length(common_precision_proteins_68), "\n",
+  "Agreement plots:", length(agreement_plots_68), "\n",
+  "Individual volcano plots:", length(volcano_plots_68), "\n",
+  "Combined volcano plots:", length(volcano_combined_68), "\n"
+)
+
+```
+Pairwise comparison of protein-level log2 fold changes for the KO versus CTRL cisplatin 6h contrast revealed positive but variable agreement across the four DIA pipelines. AlphaDIA and DIA-NN showed the strongest concordance (Pearson r = 0.711; Spearman ρ = 0.677), followed by DIA-NN and Spectronaut (r = 0.627). Comparisons involving MaxDIA exhibited weaker correlations (r = 0.389–0.476), indicating greater variability in estimated abundance changes. Among 7,465 protein groups quantified by all four pipelines, MaxDIA showed the highest median absolute log2 fold change (0.190), but also the highest median standard error (0.254) and residual variability (σ = 0.309). These findings suggest that reduced statistical precision, rather than smaller estimated fold changes, contributes to MaxDIA's lower differential abundance detection rate.
+
+
 ### Temporal patterns of cisplatin response and c-Jun-dependent regulation
 
 The cisplatin response was investigated across untreated baseline, 6-hour,
@@ -9764,6 +11746,576 @@ The 243 consensus proteins showed particularly strong agreement at 6 hours. All 
 
 Together, these findings indicate that the strongest cross-pipeline consensus in genotype-dependent cisplatin responses is concentrated at 6 hours. The results also reinforce the broader benchmarking findings: pipelines differ substantially in their ability to detect statistically significant abundance changes, while showing strong agreement in effect direction and magnitude for robust shared signals. Because the experimental conditions were distributed unevenly across acquisition batches, temporal comparisons should be interpreted as batch-adjusted cisplatin-response contrasts rather than longitudinal measurements.
 
+
+### 68 Temporal patterns of cisplatin response and c-Jun-dependent regulation
+```{r temporal_cisplatin_analysis_68, message=FALSE, warning=FALSE, eval=run_analysis}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
+
+software_colors <- c(
+  AlphaDIA = "#0072B2",
+  `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA = "#CC79A7"
+)
+
+# ============================================================
+# 1. Temporal experimental design
+# ============================================================
+
+temporal_conditions_68 <- c(
+  "CTRL_Untreated_Baseline", "CTRL_cDDP_6h", "CTRL_cDDP_24h",
+  "KO_Untreated_Baseline", "KO_cDDP_6h", "KO_cDDP_24h"
+)
+
+temporal_design_68 <- design_data_68 |>
+  filter(condition %in% temporal_conditions_68) |>
+  mutate(
+    Genotype = factor(
+      ifelse(grepl("^KO_", condition), "KO", "CTRL"),
+      levels = c("CTRL", "KO")
+    ),
+    Time = factor(
+      case_when(
+        grepl("Baseline$", condition) ~ "Baseline",
+        grepl("_6h$", condition) ~ "6h",
+        grepl("_24h$", condition) ~ "24h"
+      ),
+      levels = c("Baseline", "6h", "24h")
+    )
+  )
+
+temporal_batch_table_68 <- temporal_design_68 |>
+  dplyr::count(Genotype, Time, Batch, name = "N") |>
+  tidyr::complete(
+    Genotype, Time, Batch,
+    fill = list(N = 0)
+  )
+
+print(temporal_batch_table_68, n = Inf)
+
+p_temporal_design_68 <- ggplot(
+  temporal_batch_table_68,
+  aes(Time, Batch, fill = N)
+) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = ifelse(N > 0, N, "")), size = 4) +
+  facet_wrap(~ Genotype, nrow = 1) +
+  scale_fill_gradient(low = "#F2F4F7", high = "#0072B2") +
+  labs(
+    title = "Sample distribution across cisplatin-response conditions",
+    subtitle = "68-run analysis; sample counts by acquisition batch",
+    x = "Experimental condition",
+    y = "Acquisition batch",
+    fill = "Samples"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    strip.text = element_text(face = "bold"),
+    panel.grid = element_blank()
+  )
+
+print(p_temporal_design_68)
+
+# ============================================================
+# 2. Construct three joint temporal hypotheses
+# ============================================================
+
+stopifnot(
+  nrow(L_68) == 11L,
+  ncol(L_68) == 11L,
+  all(planned_contrasts_68$Contrast %in% colnames(L_68))
+)
+
+L_temporal_ctrl_68 <- L_68[, c(
+  "CTRL cisplatin 6h vs baseline",
+  "CTRL cisplatin 24h vs baseline"
+), drop = FALSE]
+
+L_temporal_ko_68 <- L_68[, c(
+  "KO cisplatin 6h vs baseline",
+  "KO cisplatin 24h vs baseline"
+), drop = FALSE]
+
+L_temporal_interaction_68 <- cbind(
+  "KO vs CTRL response at 6h" =
+    L_68[, "KO cisplatin 6h vs baseline"] -
+    L_68[, "CTRL cisplatin 6h vs baseline"],
+
+  "KO vs CTRL response at 24h" =
+    L_68[, "KO cisplatin 24h vs baseline"] -
+    L_68[, "CTRL cisplatin 24h vs baseline"]
+)
+
+temporal_matrices_68 <- list(
+  CTRL_response = L_temporal_ctrl_68,
+  KO_response = L_temporal_ko_68,
+  Genotype_interaction = L_temporal_interaction_68
+)
+
+temporal_matrix_check_68 <- data.frame(
+  Hypothesis = names(temporal_matrices_68),
+  Coefficients = vapply(temporal_matrices_68, nrow, integer(1)),
+  Contrasts = vapply(temporal_matrices_68, ncol, integer(1)),
+  Rank = vapply(
+    temporal_matrices_68,
+    function(x) qr(x)$rank,
+    integer(1)
+  )
+)
+
+print(temporal_matrix_check_68)
+
+stopifnot(
+  all(temporal_matrix_check_68$Coefficients == 11L),
+  all(temporal_matrix_check_68$Contrasts == 2L),
+  all(temporal_matrix_check_68$Rank == 2L)
+)
+
+# ============================================================
+# 3. Joint Wald F-tests using existing fitted models
+# ============================================================
+
+joint_test_protein_68 <- function(m, C) {
+
+  empty <- c(
+    F_stat = NA_real_,
+    df1 = 2,
+    df2 = NA_real_,
+    pval = NA_real_
+  )
+
+  if (is.null(m) || !methods::is(m, "StatModel"))
+    return(empty)
+
+  tryCatch({
+
+    beta <- m@params$coefficients
+    df2 <- as.numeric(m@dfPosterior)
+
+    if (
+      length(df2) != 1L ||
+      !is.finite(df2) ||
+      df2 <= 0 ||
+      !all(rownames(C) %in% names(beta))
+    ) return(empty)
+
+    estimate <- as.numeric(
+      crossprod(C, beta[rownames(C)])
+    )
+
+    covariance <- msqrob2::varContrast(m, L = C)
+
+    if (
+      any(!is.finite(estimate)) ||
+      any(!is.finite(covariance)) ||
+      qr(covariance)$rank < 2L
+    ) return(empty)
+
+    F_stat <- max(
+      0,
+      as.numeric(
+        crossprod(estimate, solve(covariance, estimate))
+      ) / 2
+    )
+
+    c(
+      F_stat = F_stat,
+      df1 = 2,
+      df2 = df2,
+      pval = pf(F_stat, 2, df2, lower.tail = FALSE)
+    )
+
+  }, error = function(e) empty)
+}
+
+temporal_joint_results_68 <- list()
+
+for (sw in software_order_68) {
+
+  cat("Joint temporal tests:", sw, "\n")
+
+  se <- qf_models_68[[sw]][["proteins"]]
+  models <- SummarizedExperiment::rowData(se)[["msqrobModels"]]
+
+  for (hypothesis in names(temporal_matrices_68)) {
+
+    C <- temporal_matrices_68[[hypothesis]]
+
+    tests <- t(vapply(
+      models,
+      joint_test_protein_68,
+      numeric(4),
+      C = C
+    ))
+
+    results <- data.frame(
+      Software = sw,
+      Hypothesis = hypothesis,
+      Protein = rownames(se),
+      F_stat = tests[, "F_stat"],
+      df1 = tests[, "df1"],
+      df2 = tests[, "df2"],
+      pval = tests[, "pval"]
+    )
+
+    results$adjPval <- p.adjust(results$pval, method = "BH")
+
+    temporal_joint_results_68[[
+      paste(sw, hypothesis, sep = " | ")
+    ]] <- results
+  }
+
+  rm(se, models, tests, results)
+}
+
+temporal_joint_results_68 <- bind_rows(temporal_joint_results_68)
+
+temporal_joint_summary_68 <- temporal_joint_results_68 |>
+  group_by(Hypothesis, Software) |>
+  summarise(
+    Tested_Proteins = sum(is.finite(pval)),
+    Significant_Proteins = sum(adjPval < 0.05, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(temporal_joint_summary_68, n = Inf)
+
+# ============================================================
+# 4. Cross-pipeline agreement in genotype interactions
+# ============================================================
+
+interaction_results_68 <- temporal_joint_results_68 |>
+  filter(
+    Hypothesis == "Genotype_interaction",
+    is.finite(pval),
+    is.finite(adjPval)
+  ) |>
+  select(Software, Protein, adjPval)
+
+shared_interaction_proteins_68 <- interaction_results_68 |>
+  dplyr::count(Protein, name = "N_pipelines") |>
+  dplyr::filter(N_pipelines == 4L) |>
+  dplyr::pull(Protein)
+
+interaction_shared_68 <- interaction_results_68 |>
+  filter(Protein %in% shared_interaction_proteins_68) |>
+  mutate(Significant = adjPval < 0.05)
+
+interaction_shared_summary_68 <- interaction_shared_68 |>
+  group_by(Software) |>
+  summarise(
+    Tested = n(),
+    Significant = sum(Significant),
+    Percent = round(100 * Significant / Tested, 1),
+    .groups = "drop"
+  )
+
+print(interaction_shared_summary_68)
+
+interaction_significance_68 <- interaction_shared_68 |>
+  select(Protein, Software, Significant) |>
+  pivot_wider(names_from = Software, values_from = Significant) |>
+  mutate(
+    N_significant = rowSums(
+      as.matrix(pick(all_of(software_order_68)))
+    )
+  )
+
+interaction_overlap_summary_68 <- interaction_significance_68 |>
+  dplyr::count(N_significant, name = "Proteins") |>
+  tidyr::complete(N_significant = 0:4, fill = list(Proteins = 0))
+
+interaction_consensus_68 <- interaction_significance_68 |>
+  filter(N_significant == 4L) |>
+  pull(Protein)
+
+print(interaction_overlap_summary_68)
+
+cat(
+  "\nProteins tested by all four:",
+  length(shared_interaction_proteins_68),
+  "\nSignificant in all four:",
+  length(interaction_consensus_68), "\n"
+)
+
+p_interaction_agreement_68 <- ggplot(
+  interaction_overlap_summary_68,
+  aes(factor(N_significant, levels = 0:4), Proteins)
+) +
+  geom_col(fill = "#0072B2", width = 0.7) +
+  geom_text(aes(label = Proteins), vjust = -0.3, size = 3.5) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title = "Cross-pipeline agreement in genotype-dependent cisplatin response",
+    subtitle = "Proteins tested by all four pipelines; BH FDR < 0.05",
+    x = "Number of pipelines detecting a significant interaction",
+    y = "Number of proteins"
+  ) +
+  theme_bw(base_size = 12)
+
+print(p_interaction_agreement_68)
+
+# ============================================================
+# 5. Effect-size agreement among consensus proteins
+# ============================================================
+
+interaction_effects_68 <- bind_rows(
+  lapply(software_order_68, function(sw) {
+
+    se <- qf_models_68[[sw]][["proteins"]]
+    models <- SummarizedExperiment::rowData(se)[["msqrobModels"]]
+    C <- L_temporal_interaction_68
+
+    idx <- match(interaction_consensus_68, rownames(se))
+    keep <- which(!is.na(idx))
+
+    estimates <- t(vapply(models[idx[keep]], function(m) {
+
+      if (is.null(m) || !methods::is(m, "StatModel"))
+        return(rep(NA_real_, ncol(C)))
+
+      beta <- m@params$coefficients
+
+      if (!all(rownames(C) %in% names(beta)))
+        return(rep(NA_real_, ncol(C)))
+
+      as.numeric(crossprod(C, beta[rownames(C)]))
+
+    }, numeric(ncol(C))))
+
+    colnames(estimates) <- colnames(C)
+
+    data.frame(
+      Software = sw,
+      Protein = interaction_consensus_68[keep],
+      estimates,
+      check.names = FALSE
+    )
+  })
+) |>
+  pivot_longer(
+    cols = all_of(colnames(L_temporal_interaction_68)),
+    names_to = "Time",
+    values_to = "Interaction_log2FC"
+  ) |>
+  mutate(
+    Time = ifelse(grepl("6h", Time), "6h", "24h"),
+    Software = factor(Software, levels = software_order_68)
+  )
+
+interaction_effect_wide_68 <- interaction_effects_68 |>
+  select(Protein, Time, Software, Interaction_log2FC) |>
+  pivot_wider(
+    names_from = Software,
+    values_from = Interaction_log2FC
+  )
+
+interaction_direction_summary_68 <- interaction_effect_wide_68 |>
+  rowwise() |>
+  mutate(
+    All_same_direction = {
+      x <- c_across(all_of(software_order_68))
+      all(is.finite(x)) && (all(x > 0) || all(x < 0))
+    }
+  ) |>
+  ungroup() |>
+  group_by(Time) |>
+  summarise(
+    Proteins = n(),
+    Same_direction = sum(All_same_direction),
+    Percent_agreement = round(
+      100 * mean(All_same_direction), 1
+    ),
+    .groups = "drop"
+  )
+
+print(interaction_direction_summary_68)
+
+interaction_correlations_68 <- interaction_effect_wide_68 |>
+  group_by(Time) |>
+  group_modify(~ bind_rows(
+    lapply(combn(software_order_68, 2, simplify = FALSE), function(pair) {
+
+      x <- .x[[pair[1]]]
+      y <- .x[[pair[2]]]
+      valid <- is.finite(x) & is.finite(y)
+
+      data.frame(
+        Pipeline_1 = pair[1],
+        Pipeline_2 = pair[2],
+        N = sum(valid),
+        Pearson_r = if (sum(valid) >= 3L)
+          cor(x[valid], y[valid])
+        else NA_real_
+      )
+    })
+  )) |>
+  ungroup()
+
+print(interaction_correlations_68, n = Inf)
+
+p_interaction_effects_68 <- ggplot(
+  interaction_effects_68,
+  aes(Software, Interaction_log2FC, group = Protein)
+) +
+  geom_line(alpha = 0.08, color = "grey45") +
+  geom_point(aes(color = Software), alpha = 0.35, size = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  facet_wrap(~ Time, nrow = 1) +
+  scale_color_manual(values = software_colors) +
+  labs(
+    title = "Genotype-interaction effect sizes across DIA pipelines",
+    subtitle = paste(
+      length(interaction_consensus_68),
+      "proteins significant in all four joint interaction tests"
+    ),
+    x = NULL,
+    y = "KO response minus CTRL response (log2 scale)"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 30, hjust = 1)
+  )
+
+print(p_interaction_effects_68)
+
+# ============================================================
+# 6. Individual 6h and 24h genotype-interaction tests
+# ============================================================
+
+interaction_time_results_68 <- bind_rows(
+  lapply(software_order_68, function(sw) {
+
+    # Work on a temporary object; retain the fitted original
+    qf <- msqrob2::hypothesisTest(
+      qf_models_68[[sw]],
+      i = "proteins",
+      contrast = L_temporal_interaction_68,
+      resultsColumnNamePrefix = "temporal_"
+    )
+
+    results <- msqrob2::msqrobCollect(
+      qf[["proteins"]],
+      contrast = L_temporal_interaction_68,
+      resultsColumnNamePrefix = "temporal_"
+    )
+
+    rm(qf)
+
+    as.data.frame(results) |>
+      mutate(Software = sw)
+  })
+) |>
+  mutate(
+    Time = case_when(
+      grepl("6h", contrast) ~ "6h",
+      grepl("24h", contrast) ~ "24h",
+      TRUE ~ NA_character_
+    )
+  ) |>
+  filter(
+    feature %in% interaction_consensus_68,
+    !is.na(Time)
+  )
+
+interaction_time_summary_68 <- interaction_time_results_68 |>
+  group_by(Software, Time) |>
+  summarise(
+    Tested = sum(is.finite(pval)),
+    Significant = sum(adjPval < 0.05, na.rm = TRUE),
+    Percent = round(100 * Significant / Tested, 1),
+    .groups = "drop"
+  )
+
+print(interaction_time_summary_68, n = Inf)
+
+interaction_time_status_68 <- interaction_time_results_68 |>
+  mutate(Significant = is.finite(adjPval) & adjPval < 0.05) |>
+  select(Software, feature, Time, Significant) |>
+  pivot_wider(
+    names_from = Time,
+    values_from = Significant,
+    values_fill = FALSE
+  ) |>
+  mutate(
+    Response_pattern = case_when(
+      `6h` & `24h` ~ "Both 6h and 24h",
+      `6h` ~ "6h only",
+      `24h` ~ "24h only",
+      TRUE ~ "Neither individually"
+    )
+  )
+
+interaction_time_pattern_summary_68 <- interaction_time_status_68 |>
+  dplyr::count(Software, Response_pattern, name = "Proteins") |>
+  tidyr::complete(
+    Software = software_order_68,
+    Response_pattern = c(
+      "6h only",
+      "24h only",
+      "Both 6h and 24h",
+      "Neither individually"
+    ),
+    fill = list(Proteins = 0)
+  )
+
+print(interaction_time_pattern_summary_68, n = Inf)
+
+p_interaction_time_patterns_68 <- interaction_time_pattern_summary_68 |>
+  mutate(
+    Response_pattern = factor(
+      Response_pattern,
+      levels = c(
+        "6h only",
+        "Both 6h and 24h",
+        "24h only",
+        "Neither individually"
+      )
+    ),
+    Software = factor(Software, levels = software_order_68)
+  ) |>
+  ggplot(aes(Software, Proteins, fill = Response_pattern)) +
+  geom_col(width = 0.75) +
+  scale_fill_brewer(palette = "Set2") +
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE, title = NULL)) +
+  labs(
+    title = "Time-specific genotype interactions",
+    subtitle = paste(
+      length(interaction_consensus_68),
+      "proteins significant in all four joint interaction tests"
+    ),
+    x = NULL,
+    y = "Number of proteins"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.justification = "center",
+    legend.text = element_text(size = 10),
+    legend.key.size = grid::unit(0.35, "cm"),
+    legend.spacing.y = grid::unit(0, "cm"),
+    legend.margin = margin(0, 0, 0, 0),
+    plot.margin = margin(3, 3, 3, 3),
+    axis.text.x = element_text(angle = 30, hjust = 1)
+  )
+
+print(p_interaction_time_patterns_68)
+
+cat("\nCompleted temporal cisplatin analysis (68 runs).\n")
+gc(verbose = FALSE)
+
+```
+The results suggest that genotype-dependent differences in the cisplatin response are predominantly associated with the 6h timepoint, although agreement between pipelines varies substantially.
+
+Across the four pipelines, the joint genotype-interaction test identified 2,209 significant proteins in AlphaDIA, 905 in DIA-NN, 497 in Spectronaut, and 19 in MaxDIA (BH FDR < 0.05). Among 7,460 proteins tested by all four pipelines, only 16 were significant in all four, indicating limited consensus in statistical detection. However, these 16 proteins showed strong agreement in their 6h interaction effect sizes (Pearson r = 0.926–0.993), with consistent effect directions across all pipelines. In contrast, 24h effect-size correlations were weaker (r = −0.182–0.616), and none of the 16 proteins showed an individually significant 24h interaction. Together, these findings support a reproducible early genotype-dependent cisplatin response among a small consensus protein set.
+
 ### Within-condition quantitative reproducibility
 ```{r within-condition-reproducibility}
 # Reuse existing QFeatures objects
@@ -9878,6 +12430,124 @@ print(p_reproducibility)
 ```
 
 Within-condition quantitative variability was evaluated using the standard deviation (SD) of log2-transformed protein abundances among biological replicates belonging to the same experimental condition and acquisition batch. DIA-NN exhibited the lowest median within-group SD (0.109), closely followed by AlphaDIA (0.118), whereas Spectronaut showed moderately higher variability (0.145). MaxDIA exhibited the highest median SD (0.261), approximately 2.4-fold greater than DIA-NN. The interquartile ranges followed a similar pattern, with DIA-NN (0.058–0.204) and AlphaDIA (0.064–0.213) displaying narrower variability distributions than Spectronaut (0.075–0.288) and MaxDIA (0.145–0.460). These findings indicate that DIA-NN and AlphaDIA provided the most consistent protein abundance estimates among biological replicates, while MaxDIA showed substantially greater within-condition variability. This observation is consistent with the higher residual variability and lower differential abundance sensitivity previously observed for MaxDIA. However, because the analysis included biological rather than technical replicates and was performed on each pipeline's quantified protein set, these results reflect combined biological and technical variability rather than isolated technical reproducibility.
+
+### 68 Within-condition quantitative reproducibility
+```{r within_condition_reproducibility_68, message=FALSE, warning=FALSE, eval=run_analysis}
+
+software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
+
+# Extract within-condition, within-batch protein variability
+reproducibility_results_68 <- lapply(software_order_68, function(sw) {
+
+  se <- qf_models_68[[sw]][["proteins"]]
+  abund <- SummarizedExperiment::assay(se)
+
+  metadata <- design_data_68[
+    match(colnames(abund), design_data_68$Run),
+    c("Run", "condition", "Batch")
+  ]
+
+  stopifnot(
+    ncol(abund) == 68L,
+    !anyNA(metadata$Run),
+    identical(as.character(metadata$Run), colnames(abund))
+  )
+
+  groups <- split(
+    seq_len(ncol(abund)),
+    interaction(metadata$condition, metadata$Batch, drop = TRUE)
+  )
+
+  # Retain condition-batch groups with at least two replicates
+  groups <- groups[lengths(groups) >= 2L]
+
+  dplyr::bind_rows(lapply(groups, function(idx) {
+
+    x <- abund[, idx, drop = FALSE]
+    n_observed <- rowSums(is.finite(x))
+
+    # Faster than apply(..., sd) for large protein matrices
+    x[!is.finite(x)] <- NA_real_
+
+    protein_sd <- matrixStats::rowSds(
+      x,
+      na.rm = TRUE
+    )
+    protein_sd[n_observed < 2L] <- NA_real_
+
+    data.frame(
+      Software = sw,
+      Protein = rownames(abund),
+      Condition = as.character(metadata$condition[idx[1]]),
+      Batch = as.character(metadata$Batch[idx[1]]),
+      N_replicates = length(idx),
+      N_observed = n_observed,
+      SD_log2 = protein_sd
+    )
+  }))
+}) |>
+  dplyr::bind_rows()
+
+# Summarize within-group variability
+reproducibility_summary_68 <- reproducibility_results_68 |>
+  dplyr::filter(is.finite(SD_log2)) |>
+  dplyr::group_by(Software) |>
+  dplyr::summarise(
+    Protein_group_measurements = dplyr::n(),
+    Median_SD_log2 = median(SD_log2),
+    Q1_SD_log2 = unname(quantile(SD_log2, 0.25)),
+    Q3_SD_log2 = unname(quantile(SD_log2, 0.75)),
+    .groups = "drop"
+  ) |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68)
+  ) |>
+  dplyr::arrange(Software)
+
+print(reproducibility_summary_68, n = Inf)
+
+# Plot within-group variability
+p_reproducibility_68 <- reproducibility_results_68 |>
+  dplyr::filter(is.finite(SD_log2)) |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68)
+  ) |>
+  ggplot2::ggplot(
+    ggplot2::aes(x = Software, y = SD_log2, fill = Software)
+  ) +
+  ggplot2::geom_boxplot(
+    outlier.shape = NA,
+    width = 0.65
+  ) +
+  ggplot2::coord_cartesian(
+    ylim = c(
+      0,
+      unname(quantile(
+        reproducibility_results_68$SD_log2[
+          is.finite(reproducibility_results_68$SD_log2)
+        ],
+        0.95
+      ))
+    )
+  ) +
+  ggplot2::scale_fill_manual(values = software_colors) +
+  ggplot2::labs(
+    title = "Within-condition quantitative variability",
+    subtitle = "68 retained runs; biological replicates grouped by condition and acquisition batch",
+    x = NULL,
+    y = "Within-group SD of log2 protein abundance"
+  ) +
+  ggplot2::theme_bw(base_size = 12) +
+  ggplot2::theme(
+    legend.position = "none",
+    axis.text.x = ggplot2::element_text(angle = 30, hjust = 1)
+  )
+
+print(p_reproducibility_68)
+
+```
+Within-condition quantitative variability was assessed using the standard deviation (SD) of log2-transformed protein abundances among biological replicates within the same experimental condition and acquisition batch. DIA-NN exhibited the lowest median SD (0.108), closely followed by AlphaDIA (0.115), whereas Spectronaut showed moderately higher variability (0.144). MaxDIA exhibited the highest median SD (0.266), approximately 2.5-fold greater than DIA-NN. Interquartile ranges showed a similar pattern, with DIA-NN (0.057–0.204) and AlphaDIA (0.062–0.208) displaying narrower variability distributions than Spectronaut (0.074–0.289) and MaxDIA (0.146–0.474). These findings indicate greater within-condition quantitative consistency for DIA-NN and AlphaDIA, whereas MaxDIA showed substantially higher variability. Because the analysis used biological replicates and pipeline-specific protein sets, these estimates reflect combined biological and technical variability rather than isolated technical reproducibility.
+Excluding Group 4 did not materially alter the relative reproducibility ranking: DIA-NN ≈ AlphaDIA < Spectronaut < MaxDIA in median within-condition variability.
 
 ### Dynamic range and abundance-dependent precision
 
@@ -10092,6 +12762,265 @@ if (length(failed) > 0) {
 }
 ```
 
+### 68 Dynamic range and abundance-dependent precision
+```{r abundance_precision_and_save_68, eval=run_analysis, message=FALSE, warning=FALSE}
+
+# ============================================================
+# 1. Abundance-dependent precision: 68 retained runs
+# ============================================================
+
+software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
+
+shared_proteins_precision_68 <- Reduce(
+  intersect,
+  lapply(qf_models_68[software_order_68], function(qf) {
+    rownames(qf[["proteins"]])
+  })
+)
+
+abundance_precision_68 <- dplyr::bind_rows(
+  lapply(software_order_68, function(sw) {
+
+    se <- qf_models_68[[sw]][["proteins"]]
+    idx <- match(shared_proteins_precision_68, rownames(se))
+
+    abundance <- SummarizedExperiment::assay(se)[idx, , drop = FALSE]
+    models <- SummarizedExperiment::rowData(se)[["msqrobModels"]][idx]
+
+    mean_abundance <- rowMeans(abundance, na.rm = TRUE)
+    mean_abundance[!is.finite(mean_abundance)] <- NA_real_
+
+    residual_sd <- vapply(models, function(m) {
+      if (is.null(m) || !methods::is(m, "StatModel"))
+        return(NA_real_)
+
+      s <- m@params$sigma
+
+      if (length(s) != 1L || !is.finite(s) || s <= 0)
+        return(NA_real_)
+
+      as.numeric(s)
+    }, numeric(1))
+
+    data.frame(
+      Software = sw,
+      Protein = shared_proteins_precision_68,
+      Mean_log2_abundance = mean_abundance,
+      Residual_SD = residual_sd
+    )
+  })
+) |>
+  dplyr::filter(
+    is.finite(Mean_log2_abundance),
+    is.finite(Residual_SD),
+    Residual_SD > 0
+  ) |>
+  dplyr::group_by(Software) |>
+  dplyr::mutate(
+    Abundance_decile = dplyr::ntile(Mean_log2_abundance, 10)
+  ) |>
+  dplyr::ungroup()
+
+# ============================================================
+# 2. Summarize residual SD across abundance deciles
+# ============================================================
+
+abundance_precision_summary_68 <- abundance_precision_68 |>
+  dplyr::group_by(Software, Abundance_decile) |>
+  dplyr::summarise(
+    N_proteins = dplyr::n(),
+    Median_residual_SD = median(Residual_SD),
+    Q1 = unname(quantile(Residual_SD, 0.25)),
+    Q3 = unname(quantile(Residual_SD, 0.75)),
+    .groups = "drop"
+  )
+
+print(abundance_precision_summary_68, n = Inf)
+
+abundance_precision_extremes_68 <- abundance_precision_summary_68 |>
+  dplyr::filter(Abundance_decile %in% c(1, 10)) |>
+  dplyr::select(
+    Software, Abundance_decile, Median_residual_SD
+  ) |>
+  tidyr::pivot_wider(
+    names_from = Abundance_decile,
+    values_from = Median_residual_SD,
+    names_prefix = "Decile_"
+  ) |>
+  dplyr::mutate(
+    Low_to_high_SD_ratio = Decile_1 / Decile_10
+  )
+
+print(abundance_precision_extremes_68)
+
+# ============================================================
+# 3. Plot abundance-dependent precision
+# ============================================================
+
+p_abundance_precision_68 <- ggplot2::ggplot(
+  abundance_precision_summary_68,
+  ggplot2::aes(
+    x = Abundance_decile,
+    y = Median_residual_SD,
+    color = Software,
+    group = Software
+  )
+) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::geom_point(size = 2) +
+  ggplot2::scale_color_manual(values = software_colors) +
+  ggplot2::scale_x_continuous(breaks = 1:10) +
+  ggplot2::labs(
+    title = "Abundance-dependent protein quantification precision",
+    subtitle = paste(
+      length(shared_proteins_precision_68),
+      "shared proteins; abundance deciles defined within each pipeline"
+    ),
+    x = "Protein abundance decile (low to high)",
+    y = "Median model residual SD\n(log2 scale)",
+    color = "DIA pipeline"
+  ) +
+  ggplot2::theme_bw(base_size = 12)
+
+print(p_abundance_precision_68)
+
+# ============================================================
+# 4. Save 68-run statistical results
+# ============================================================
+
+results_cache_dir_68 <- file.path(
+  cache_dir, "statistical_results_68"
+)
+
+dir.create(
+  results_cache_dir_68,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# Explicitly save important 68-run analysis results
+priority_objects_68 <- c(
+  "da_results_68",
+  "da_summary_68",
+  "temporal_joint_summary_68",
+  "temporal_joint_results_68",
+  "interaction_shared_summary_68",
+  "interaction_overlap_summary_68",
+  "interaction_consensus_68",
+  "interaction_effects_68",
+  "interaction_direction_summary_68",
+  "interaction_correlations_68",
+  "interaction_time_summary_68",
+  "interaction_time_pattern_summary_68",
+  "reproducibility_summary_68",
+  "reproducibility_results_68",
+  "abundance_precision_summary_68",
+  "abundance_precision_extremes_68",
+  "abundance_precision_68"
+)
+
+# Include other statistical summaries, but exclude large fitted models,
+# plots, functions and intermediate QFeatures objects
+additional_objects_68 <- grep(
+  "(temporal|interaction|precision|reproducibility|agreement|sigma|residual).*_68$",
+  ls(envir = .GlobalEnv),
+  value = TRUE,
+  ignore.case = TRUE
+)
+
+objects_to_save_68 <- unique(c(
+  priority_objects_68,
+  additional_objects_68
+))
+
+objects_to_save_68 <- intersect(
+  objects_to_save_68,
+  ls(envir = .GlobalEnv)
+)
+
+objects_to_save_68 <- setdiff(
+  objects_to_save_68,
+  c(
+    "qf_models_68",
+    "proteins_68",
+    "abundance_precision_68",
+    "reproducibility_results_68"
+  )
+)
+
+saved_68 <- character()
+failed_68 <- character()
+
+for (nm in objects_to_save_68) {
+
+  obj <- get(nm, envir = .GlobalEnv, inherits = FALSE)
+
+  if (
+    is.function(obj) ||
+    is.environment(obj) ||
+    inherits(obj, "connection") ||
+    inherits(obj, "QFeatures") ||
+    inherits(obj, "SummarizedExperiment") ||
+    inherits(obj, "ggplot") ||
+    inherits(obj, "patchwork")
+  ) {
+    rm(obj)
+    next
+  }
+
+  destination <- file.path(
+    results_cache_dir_68,
+    paste0(nm, ".rds")
+  )
+
+  tryCatch(
+    {
+      saveRDS(obj, destination, compress = TRUE)
+      saved_68 <- c(saved_68, nm)
+    },
+    error = function(e) {
+      failed_68 <- c(failed_68, nm)
+      warning("Could not save ", nm, ": ", conditionMessage(e))
+    }
+  )
+
+  rm(obj)
+}
+
+manifest_68 <- data.frame(
+  object_name = saved_68,
+  file_name = paste0(saved_68, ".rds"),
+  stringsAsFactors = FALSE
+)
+
+saveRDS(
+  manifest_68,
+  file.path(
+    results_cache_dir_68,
+    "saved_results_manifest_68.rds"
+  )
+)
+
+cat(
+  "\n====================================\n",
+  "68-RUN STATISTICAL RESULTS CACHE\n",
+  "====================================\n",
+  "Directory:", results_cache_dir_68, "\n",
+  "Objects saved:", length(saved_68), "\n"
+)
+
+print(manifest_68, row.names = FALSE)
+
+if (length(failed_68) > 0L) {
+  cat("\nFailed objects:\n")
+  print(failed_68)
+}
+
+gc(verbose = FALSE)
+
+```
+Abundance-dependent precision was evaluated across 7,483 proteins shared by all four DIA pipelines using model residual standard deviations across ten within-pipeline abundance deciles. Following exclusion of Group 4, the overall precision patterns remained consistent with the original 83-run analysis. AlphaDIA and DIA-NN maintained comparatively low residual variability, with median SDs decreasing from 0.207 and 0.211 in the lowest abundance decile to 0.118 and 0.100 in the highest decile, respectively. MaxDIA exhibited consistently higher residual variability across the abundance range (0.437–0.298). Spectronaut showed the strongest abundance dependence, with residual SD decreasing from 0.617 to 0.130, representing a 4.73-fold difference. Its particularly elevated variability among low-abundance proteins persisted despite the earlier correction of intensity values equal to 1. Overall, exclusion of Group 4 did not materially alter the relative precision characteristics of the four pipelines, supporting the robustness of these pipeline-level observations to the sample exclusion.
+
 # Publication-ready multipanel figures
 
 ```{r manuscript_export_setup, eval=FALSE}
@@ -10163,6 +13092,10 @@ export_figure <- function(p, filename, width, height) {
 ## Fig 2: Identification and coverage
 ```{r export_figure_2_identification, eval=FALSE}
 library(patchwork)
+
+p_upset_precursors <- p_upset_precursors_68
+p_upset_identification <- p_upset_identification_68
+p_precursor_coverage <- p_precursor_coverage_68
 
 p2c <- get_plot("p_precursor_coverage")
 p2a <- get_plot("p_upset_precursors")
@@ -10502,6 +13435,16 @@ p_hist_protein_onePlot <- ggplot2::ggplot(
 ```{r export_figure_4_precision, eval=FALSE}
 library(patchwork)
 
+p_mds_condition_68 <- p_mds_condition
+p_mds_batch_68 <- p_mds_batch
+
+mds_qc_68 <- mds_qc
+mds_summary_68 <- mds_summary
+
+correlation_summary_68 <- correlation_summary
+p_sigma_68 <- p_sigma
+p_abundance_precision_68 <- p_abundance_precision
+
 p5a <- clean_panel(get_plot("p_mds_condition"))
 p5b <- clean_panel(get_plot("p_mds_batch"))
 p5c <- clean_panel(get_plot("p_sigma"))
@@ -10576,17 +13519,18 @@ export_figure(
 print(fig5)
 
 ```
-**Figure 5. Comparison of sample-level reproducibility, quantitative precision, and intensity distributions across four DIA proteomics analysis pipelines.** (A) Multidimensional scaling (MDS) plots showing the distribution of 83 samples processed with AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, colored by experimental condition. (B) MDS plots of the same samples colored by acquisition batch, illustrating batch-associated clustering patterns across pipelines. (C) Distribution of protein-level residual standard deviations (σ) across pipelines, displayed on a logarithmic (log10) scale. Violin plots represent the distribution of residual variability, with embedded boxplots showing the median and interquartile range. Lower residual standard deviations indicate greater quantitative precision. (D) Median protein-level residual standard deviation across ten protein abundance deciles, calculated from log2-transformed protein abundances. Deciles are ordered from lowest (1) to highest (10) protein abundance. Lower values indicate greater quantitative precision. (E) Pooled precursor-level log2 intensity distributions before filtering and normalization, showing software-dependent differences in intensity distributions. Spectronaut exhibits a pronounced low-intensity population and a sharp peak at log2 intensity = 0, corresponding to intensity values of 1. (F) Pooled precursor-level log2 intensity distributions after filtering and normalization. The sharp Spectronaut peak near zero is substantially reduced, whereas its broader low-intensity population persists, indicating that the distinct distribution is not explained solely by intensity values of 1. (G) Pooled normalized protein-level log2 intensity distributions following MaxLFQ aggregation, illustrating differences in the locations and shapes of protein abundance distributions across pipelines. Density curves in panels E–G represent the relative frequency of observed intensities within each pipeline. Together, these analyses characterize sample clustering, batch-associated variation, abundance-dependent quantitative precision, and software-specific intensity distribution patterns across the four DIA analysis pipelines.
+**Figure 5. Comparison of sample-level reproducibility, quantitative precision, and intensity distributions across four DIA proteomics analysis pipelines.** (A) Multidimensional scaling (MDS) plots showing the distribution of 68 samples processed with AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, colored by experimental condition. (B) MDS plots of the same samples colored by acquisition batch, illustrating batch-associated clustering patterns across pipelines. (C) Distribution of protein-level residual standard deviations (σ) across pipelines, displayed on a logarithmic (log10) scale. Violin plots represent the distribution of residual variability, with embedded boxplots showing the median and interquartile range. Lower residual standard deviations indicate greater quantitative precision. (D) Median protein-level residual standard deviation across ten protein abundance deciles, calculated from log2-transformed protein abundances. Deciles are ordered from lowest (1) to highest (10) protein abundance. Lower values indicate greater quantitative precision. (E) Pooled precursor-level log2 intensity distributions before filtering and normalization, showing software-dependent differences in intensity distributions. Spectronaut exhibits a pronounced low-intensity population and a sharp peak at log2 intensity = 0, corresponding to intensity values of 1. (F) Pooled precursor-level log2 intensity distributions after filtering and normalization. The sharp Spectronaut peak near zero is substantially reduced, whereas its broader low-intensity population persists, indicating that the distinct distribution is not explained solely by intensity values of 1. (G) Pooled normalized protein-level log2 intensity distributions following MaxLFQ aggregation, illustrating differences in the locations and shapes of protein abundance distributions across pipelines. Density curves in panels E–G represent the relative frequency of observed intensities within each pipeline. Together, these analyses characterize sample clustering, batch-associated variation, abundance-dependent quantitative precision, and software-specific intensity distribution patterns across the four DIA analysis pipelines.
 
 ## Fig 6: Differential abundance
-```{r export_figure_5_da, eval=FALSE}
+```{r export_figure_6_da_68, eval=FALSE}
 library(ggplot2)
 library(patchwork)
 
-p6a <- get_plot("p_da_heatmap")
-p6b <- get_plot("p_da_upset_6h")
-p6c <- get_plot("p_abs_logfc")
-# p6d <- get_plot("p_precision")
+# Retrieve existing 68-run plots
+p6a <- get_plot("p_da_heatmap_68")
+p6b <- get_plot("p_da_upset_6h_68")
+p6c <- get_plot("p_abs_logfc_68")
+p6d <- get_plot("p_precision_68")
 
 # Improve violin plot readability
 violin_theme <- theme(
@@ -10610,41 +13554,83 @@ tag_panel <- function(p, letter) {
     )
 }
 
-# Independent rows prevent heatmap margins affecting violins
+# Assemble Figure 6
 top <- tag_panel(p6a, "A") | tag_panel(p6b, "B")
-bottom <- tag_panel(p6c, "C") | tag_panel(p_precision, "D")
+bottom <- tag_panel(p6c, "C") | tag_panel(p6d, "D")
 
-fig6 <- wrap_elements(full = top) /
-  wrap_elements(full = bottom) +
+fig6_68 <- (
+  wrap_elements(full = top) /
+  wrap_elements(full = bottom)
+) +
   plot_layout(heights = c(1, 0.9))
 
 export_figure(
-  fig6,
-  "Figure_6_Differential_Abundance",
+  fig6_68,
+  "Figure_6_Differential_Abundance_68",
   14, 8
 )
 
-print(fig6)
+print(fig6_68)
 ```
-**Figure 6. Differential protein abundance, cross-pipeline agreement, and statistical precision across four DIA proteomics analysis pipelines.** (A) Heatmap showing the number of significantly differentially abundant protein groups identified by AlphaDIA, DIA-NN, Spectronaut, and MaxDIA across 11 experimental contrasts. Cell values indicate the number of significant protein groups, with darker blue representing higher counts. Significance was defined using the Benjamini–Hochberg-adjusted p-value (FDR < 0.05), with statistical models adjusted for acquisition batch. (B) UpSet plot showing the overlap of significantly differentially abundant protein groups for the knockout (KO) versus control (CTRL) comparison following 6 h of cisplatin treatment. Protein groups were matched across pipelines using exact protein-group identifiers. Vertical bars represent the numbers of protein groups in each exclusive intersection, horizontal bars indicate the total number of significant protein groups per pipeline, and connected filled dots identify the contributing pipelines. A total of 557 protein groups were significant in all four pipelines, while 1,210 additional protein groups were shared by AlphaDIA, DIA-NN, and Spectronaut but not MaxDIA. Of the 647 significant protein groups identified by MaxDIA, 86.1% were also significant in all three other pipelines. (C) Distributions of absolute protein log2 fold changes for the same KO versus CTRL cisplatin 6 h contrast, shown separately for all testable proteins and protein groups shared by all four pipelines. (D) Distributions of contrast-specific standard errors and absolute t-statistics for the same contrast, restricted to shared protein groups with finite log2 fold changes, positive finite standard errors, and finite t-statistics across all four pipelines. In panels C and D, violin plots show the distributions, with embedded boxplots indicating the median and interquartile range.
+**Figure 6. Differential protein abundance, cross-pipeline agreement, and statistical precision across four DIA proteomics analysis pipelines.** (A) Heatmap showing the number of significantly differentially abundant protein groups identified by AlphaDIA, DIA-NN, Spectronaut, and MaxDIA across 11 experimental contrasts. Cell values indicate the number of significant protein groups, with darker blue representing higher counts. Significance was defined using the Benjamini–Hochberg-adjusted p-value (FDR < 0.05), with statistical models adjusted for acquisition batch. (B) UpSet plot showing the overlap of significantly differentially abundant protein groups for the knockout (KO) versus control (CTRL) comparison following 6 h of cisplatin treatment. Protein groups were matched across pipelines using exact protein-group identifiers. Vertical bars represent exclusive intersections, horizontal bars indicate the total number of significant protein groups per pipeline, and connected filled dots identify contributing pipelines. A total of 57 protein groups were significant in all four pipelines, while 551 additional protein groups were shared by AlphaDIA, DIA-NN, and Spectronaut but not MaxDIA. (C) Distributions of absolute protein log2 fold changes for the same KO versus CTRL cisplatin 6 h contrast, shown separately for all testable proteins and protein groups shared by all four pipelines. (D) Distributions of contrast-specific standard errors and absolute t-statistics for the same contrast, restricted to shared protein groups with finite log2 fold changes, positive finite standard errors, and finite t-statistics across all four pipelines. In panels C and D, violin plots show the distributions, with embedded boxplots indicating the median and interquartile range.
 
 ## Fig 7: Fold-change agreement
-```{r export_figure_6_logfc, eval=FALSE}
-fig7 <- get_plot("p_logfc_agreement_6h") +
-  labs(title = NULL, caption = NULL)
 
-export_figure(fig7, "Figure_7_FoldChange_Agreement", 7, 7)
+```{r export_figure_7_logfc_68, eval=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(patchwork)
+
+# Retrieve the 68-run fold-change agreement plot
+fig7 <- get_plot("p_logfc_agreement_6h_68") +
+  labs(
+    title = NULL,
+    caption = NULL
+  )
+
+export_figure(
+  fig7,
+  "Figure_7_FoldChange_Agreement_68",
+  7, 7
+)
+
 print(fig7)
 ```
-
-**Figure 7. Pairwise agreement in protein log2 fold changes across four DIA proteomics analysis pipelines.** Scatterplots compare protein-level log2 fold-change estimates between AlphaDIA, DIA-NN, Spectronaut, and MaxDIA for all six pairwise pipeline combinations. Each point represents a protein group with fold-change estimates available from both pipelines. The x- and y-axes represent the log2 fold changes estimated by the first and second pipelines named in each panel, respectively. Orange dashed lines indicate the line of identity (y = x), representing perfect agreement between pipelines. Points closer to this line indicate greater concordance in estimated fold-change magnitude and direction, whereas deviations reflect differences in quantitative effect-size estimates. Comparisons illustrate the consistency and variability of protein-level differential abundance estimates across DIA analysis pipelines.
+**Figure 7. Pairwise agreement in protein log2 fold changes across four DIA proteomics analysis pipelines.** Scatterplots compare protein-level log2 fold-change estimates for KO versus CTRL after 6 h of cisplatin treatment across all six pairwise combinations of AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, based on the 68-run analysis. Each point represents a protein group with fold-change estimates available from both pipelines. The x- and y-axes represent the log2 fold changes estimated by the first and second pipelines named in each panel, respectively. Orange dashed lines indicate the line of identity (y = x), representing perfect agreement between pipelines. Points closer to this line indicate greater concordance in estimated fold-change magnitude and direction, whereas deviations reflect differences in quantitative effect-size estimates. Comparisons illustrate the consistency and variability of protein-level differential abundance estimates across DIA analysis pipelines.
 
 ## Fig 8: Temporal interactions
-```{r export_figure_7_temporal, eval=FALSE}
-p8a <- p_interaction_agreement
-p8b <- p_interaction_time_patterns
-p8c <- get_plot("p_interaction_effects")+
-  labs(y = "KO response minus CTRL response\n(log2 scale)") +
+
+```{r export_figure_8_temporal_68, eval=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(patchwork)
+
+# Retrieve existing 68-run plots
+p8a <- get_plot("p_interaction_agreement_68")
+p8b <- get_plot("p_interaction_time_patterns_68")
+p8c <- get_plot("p_interaction_effects_68")
+p8d <- get_plot("p_reproducibility_68")
+
+# Panel A: Cross-pipeline agreement
+p8a <- p8a +
+  labs(
+    title = "Cross-pipeline interaction\nagreement",
+    subtitle = NULL,
+    x = "Pipelines detecting significant\ninteraction"
+  )
+
+# Panel B: Time-specific interactions
+p8b <- p8b +
+  labs(
+    title = "Time-specific interactions",
+    subtitle = NULL
+  )
+
+# Panel C: Genotype-interaction effect sizes
+p8c <- p8c +
+  labs(
+    title = "Genotype-interaction\neffect sizes",
+    subtitle = NULL,
+    y = "KO response minus CTRL response\n(log2 scale)"
+  ) +
   theme(
     axis.title.y = element_text(
       size = 12,
@@ -10653,35 +13639,34 @@ p8c <- get_plot("p_interaction_effects")+
     )
   )
 
-p8a <- p8a + labs(
-  title = "Cross-pipeline interaction\nagreement",
-  subtitle = NULL,
-  x = "Pipelines detecting significant\ninteraction"
-)
+# Panel D: Within-condition quantitative variability
+p8d <- p8d +
+  labs(
+    title = "Within-condition\nquantitative variability",
+    subtitle = NULL,
+    y = "Within-group SD of log2 protein\nabundance"
+  )
 
-p8b <- p8b + labs(
-  title = "Time-specific interactions",
-  subtitle = NULL
-)
-
-p8c <- p8c + labs(
-  title = "Genotype-interaction effect sizes",
-  subtitle = NULL
-)
-
-fig8 <- (p8a | p8b) / p8c +
-  plot_layout(heights = c(1, 1.3)) +
-  plot_annotation(tag_levels = "A")
-fig8 <- fig8 &
+# Assemble Figure 8
+fig8_68 <- (
+  (p8a | p8b) /
+  (p8c | p8d)
+) +
+  plot_layout(heights = c(1, 1.2)) +
+  plot_annotation(tag_levels = "A") &
   theme(
     plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(fig8, "Figure_8_Temporal_Interactions", 7, 8)
-print(fig8)
-```
-**Figure 8. Cross-pipeline agreement and temporal patterns of genotype-dependent cisplatin responses across four DIA proteomics analysis pipelines.** (A) Distribution of protein groups according to the number of pipelines detecting a statistically significant genotype-by-treatment interaction. The analysis was restricted to proteins tested by all four pipelines (AlphaDIA, DIA-NN, Spectronaut, and MaxDIA), with significance defined using Benjamini–Hochberg-adjusted p-values < 0.05. Among these proteins, 4,173 showed no significant interaction in any pipeline, whereas 1,428, 864, 758, and 243 were significant in one, two, three, or all four pipelines, respectively. (B) Temporal classification of the 243 protein groups with significant joint interaction tests in all four pipelines, based on the significance of individual interaction tests at 6 and 24 h. Stacked bars indicate the number of proteins significant at 6 h only, 24 h only, both time points, or neither time point individually. (C) Genotype-dependent cisplatin response effect sizes for the same 243 protein groups at 24 h (left) and 6 h (right), expressed as knockout (KO) minus control (CTRL) responses on the log2 scale. Each point represents a protein-group effect estimate from one DIA pipeline, and gray lines connect corresponding protein groups across pipelines. The horizontal dashed line indicates zero interaction effect. Positive and negative values represent opposite directions of genotype-dependent treatment response. Together, these analyses assess the reproducibility of genotype-dependent cisplatin responses, their temporal specificity, and the agreement of interaction effect estimates across DIA analysis pipelines.
+export_figure(
+  fig8_68,
+  "Figure_8_Temporal_Interactions_68",
+  7, 8
+)
 
+print(fig8_68)
+```
+**Figure 8. Cross-pipeline agreement, temporal genotype-dependent cisplatin responses, and within-condition quantitative variability across four DIA proteomics analysis pipelines.** (A) Distribution of protein groups according to the number of pipelines detecting a significant genotype-by-treatment interaction, restricted to 7,460 proteins tested by all four pipelines. Significance was defined using Benjamini–Hochberg-adjusted p-values < 0.05. Among these proteins, 5,488 showed no significant interaction, whereas 1,342, 407, 207, and 16 were significant in one, two, three, or all four pipelines, respectively. (B) Temporal classification of the 16 protein groups with significant joint interaction tests in all four pipelines, based on individual interaction tests at 6 and 24 h. (C) Genotype-dependent cisplatin response effect sizes for these 16 protein groups at 24 h and 6 h, expressed as KO minus CTRL responses on the log2 scale. Gray lines connect corresponding protein groups across pipelines, and the dashed horizontal line indicates zero interaction effect. (D) Within-condition quantitative variability, measured as the standard deviation of log2 protein abundance among biological replicates within the same experimental condition and acquisition batch. Boxplots show the median and interquartile range. All analyses used the 68 retained runs, with acquisition batch included in the statistical models. Because 6 h and 24 h treated samples were acquired in different batches, cross-timepoint comparisons require cautious interpretation.
 
 
 

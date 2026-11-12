@@ -13,8 +13,8 @@ time zone: Europe/Helsinki
 tzcode source: internal
 
 attached base packages:
-[1] grid      stats4    stats     graphics  grDevices utils     datasets 
-[8] methods   base     
+[1] grid      stats4    stats     graphics  grDevices utils    
+[7] datasets  methods   base     
 
 other attached packages:
  [1] bipartite_2.24              vegan_2.7-6                
@@ -24,20 +24,21 @@ other attached packages:
  [9] ggcorrplot_0.3.0            arrow_26.0.0               
 [11] scater_1.40.2               scuttle_1.22.0             
 [13] SingleCellExperiment_1.34.0 ComplexHeatmap_2.28.0      
-[15] kableExtra_1.4.1            patchwork_1.3.2            
-[17] MsCoreUtils_1.24.0          ExploreModelMatrix_1.24.0  
-[19] msqrob2_1.20.0              data.table_1.18.6.1        
-[21] QFeatures_1.22.0            MultiAssayExperiment_1.38.0
-[23] SummarizedExperiment_1.42.0 Biobase_2.72.0             
-[25] GenomicRanges_1.64.0        Seqinfo_1.2.0              
-[27] IRanges_2.46.0              S4Vectors_0.50.2           
-[29] BiocGenerics_0.58.1         generics_0.1.4             
-[31] MatrixGenerics_1.24.0       matrixStats_1.5.0          
-[33] lubridate_1.9.5             forcats_1.0.1              
-[35] stringr_1.6.0               dplyr_1.2.1                
-[37] purrr_1.2.2                 readr_2.2.0                
-[39] tidyr_1.3.2                 tibble_3.3.1               
-[41] ggplot2_4.0.3               tidyverse_2.0.0            
+[15] kableExtra_1.4.1            MsCoreUtils_1.24.0         
+[17] ExploreModelMatrix_1.24.0   msqrob2_1.20.0             
+[19] QFeatures_1.22.0            MultiAssayExperiment_1.38.0
+[21] SummarizedExperiment_1.42.0 Biobase_2.72.0             
+[23] GenomicRanges_1.64.0        Seqinfo_1.2.0              
+[25] IRanges_2.46.0              S4Vectors_0.50.2           
+[27] BiocGenerics_0.58.1         generics_0.1.4             
+[29] MatrixGenerics_1.24.0       matrixStats_1.5.0          
+[31] lubridate_1.9.5             forcats_1.0.1              
+[33] stringr_1.6.0               dplyr_1.2.1                
+[35] purrr_1.2.2                 readr_2.2.0                
+[37] tidyr_1.3.2                 tibble_3.3.1               
+[39] ggplot2_4.0.3               tidyverse_2.0.0            
+[41] scales_1.4.0                data.table_1.18.6.1        
+[43] patchwork_1.3.2            
 
 loaded via a namespace (and not attached):
   [1] splines_4.6.0           later_1.4.8            
@@ -45,54 +46,56 @@ loaded via a namespace (and not attached):
   [5] Rdpack_2.6.6            doParallel_1.0.17      
   [7] lattice_0.23-1          MASS_7.3-66            
   [9] magrittr_2.0.5          limma_3.68.5           
- [11] httpuv_1.6.17           otel_0.2.0             
- [13] spam_2.11-4             cowplot_1.2.0          
- [15] iq_2.1.0                minqa_1.2.8            
- [17] RColorBrewer_1.1-3      maps_3.4.3             
- [19] abind_1.4-8             AnnotationFilter_1.36.0
- [21] circlize_0.4.18         ggrepel_0.9.8          
- [23] irlba_2.3.7             svglite_2.2.2          
- [25] codetools_0.2-20        DelayedArray_0.38.2    
- [27] DT_0.34.0               xml2_1.6.0             
- [29] shape_1.4.6.1           tidyselect_1.2.1       
- [31] farver_2.1.2            lme4_2.0-6             
- [33] ScaledMatrix_1.20.0     viridis_0.6.5          
- [35] ComplexUpset_1.3.3      jsonlite_2.0.0         
- [37] GetoptLong_1.1.1        BiocNeighbors_2.6.0    
- [39] iterators_1.0.14        systemfonts_1.3.2      
- [41] foreach_1.5.2           tools_4.6.0            
- [43] Rcpp_1.1.2              glue_1.8.1             
- [45] gridExtra_2.3.1         SparseArray_1.12.2     
- [47] xfun_0.60               mgcv_1.9-4             
- [49] shinydashboard_0.7.3    withr_3.0.3            
- [51] fastmap_1.2.0           boot_1.3-32            
- [53] shinyjs_2.1.1           digest_0.6.39          
- [55] rsvd_1.0.5              timechange_0.4.0       
- [57] R6_2.6.1                mime_0.13              
- [59] textshaping_1.0.5       colorspace_2.1-3       
- [61] htmlwidgets_1.6.4       S4Arrays_1.12.0        
- [63] pkgconfig_2.0.3         gtable_0.3.6           
- [65] S7_0.2.2                XVector_0.52.0         
- [67] htmltools_0.5.9         dotCall64_1.2          
- [69] ProtGenerics_1.44.0     rintrojs_0.3.4         
- [71] clue_0.3-68             scales_1.4.0           
- [73] png_0.1-9               reformulas_0.4.4       
- [75] rstudioapi_0.19.0       rjson_0.2.23           
- [77] tzdb_0.5.0              reshape2_1.4.5         
- [79] coda_0.19-4.1           nlme_3.1-171           
- [81] nloptr_2.2.1            GlobalOptions_0.1.4    
- [83] parallel_4.6.0          vipor_0.4.7            
- [85] pillar_1.11.1           vctrs_0.7.3            
- [87] promises_1.5.0          BiocSingular_1.28.0    
- [89] beachmat_2.28.0         xtable_1.8-8           
- [91] cluster_2.1.8.3         beeswarm_0.4.0         
- [93] evaluate_1.0.5          cli_3.6.6              
- [95] compiler_4.6.0          rlang_1.3.0            
- [97] crayon_1.5.3            plyr_1.8.9             
- [99] ggbeeswarm_0.7.3        stringi_1.8.9          
-[101] viridisLite_0.4.3       BiocParallel_1.46.0    
-[103] assertthat_0.2.1        lazyeval_0.2.3         
-[105] Matrix_1.7-6            hms_1.1.4              
-[107] bit64_4.8.6             statmod_1.5.2          
-[109] shiny_1.14.0            rbibutils_2.4.1        
-[111] igraph_2.3.3            bit_4.6.0              
+ [11] yaml_2.3.12             httpuv_1.6.17          
+ [13] otel_0.2.0              spam_2.11-4            
+ [15] cowplot_1.2.0           iq_2.1.0               
+ [17] minqa_1.2.8             RColorBrewer_1.1-3     
+ [19] maps_3.4.3              abind_1.4-8            
+ [21] AnnotationFilter_1.36.0 circlize_0.4.18        
+ [23] ggrepel_0.9.8           irlba_2.3.7            
+ [25] svglite_2.2.2           codetools_0.2-20       
+ [27] DelayedArray_0.38.2     DT_0.34.0              
+ [29] xml2_1.6.0              shape_1.4.6.1          
+ [31] tidyselect_1.2.1        farver_2.1.2           
+ [33] lme4_2.0-6              ScaledMatrix_1.20.0    
+ [35] viridis_0.6.5           ComplexUpset_1.3.3     
+ [37] jsonlite_2.0.0          GetoptLong_1.1.1       
+ [39] BiocNeighbors_2.6.0     iterators_1.0.14       
+ [41] systemfonts_1.3.2       foreach_1.5.2          
+ [43] tools_4.6.0             Rcpp_1.1.2             
+ [45] glue_1.8.1              gridExtra_2.3.1        
+ [47] SparseArray_1.12.2      BiocBaseUtils_1.14.2   
+ [49] xfun_0.60               mgcv_1.9-4             
+ [51] shinydashboard_0.7.3    withr_3.0.3            
+ [53] fastmap_1.2.0           boot_1.3-32            
+ [55] shinyjs_2.1.1           digest_0.6.39          
+ [57] rsvd_1.0.5              timechange_0.4.0       
+ [59] R6_2.6.1                mime_0.13              
+ [61] textshaping_1.0.5       colorspace_2.1-3       
+ [63] utf8_1.2.6              htmlwidgets_1.6.4      
+ [65] S4Arrays_1.12.0         pkgconfig_2.0.3        
+ [67] gtable_0.3.6            S7_0.2.2               
+ [69] XVector_0.52.0          htmltools_0.5.9        
+ [71] dotCall64_1.2           ProtGenerics_1.44.0    
+ [73] rintrojs_0.3.4          clue_0.3-68            
+ [75] png_0.1-9               reformulas_0.4.4       
+ [77] rstudioapi_0.19.0       rjson_0.2.23           
+ [79] tzdb_0.5.0              reshape2_1.4.5         
+ [81] coda_0.19-4.1           nlme_3.1-171           
+ [83] nloptr_2.2.1            GlobalOptions_0.1.4    
+ [85] parallel_4.6.0          vipor_0.4.7            
+ [87] pillar_1.11.1           vctrs_0.7.3            
+ [89] promises_1.5.0          BiocSingular_1.28.0    
+ [91] beachmat_2.28.0         xtable_1.8-8           
+ [93] cluster_2.1.8.3         beeswarm_0.4.0         
+ [95] evaluate_1.0.5          cli_3.6.6              
+ [97] compiler_4.6.0          rlang_1.3.0            
+ [99] crayon_1.5.3            labeling_0.4.3         
+[101] plyr_1.8.9              ggbeeswarm_0.7.3       
+[103] stringi_1.8.9           viridisLite_0.4.3      
+[105] BiocParallel_1.46.0     assertthat_0.2.1       
+[107] lazyeval_0.2.3          Matrix_1.7-6           
+[109] hms_1.1.4               bit64_4.8.6            
+[111] statmod_1.5.2           shiny_1.14.0           
+[113] rbibutils_2.4.1         igraph_2.3.3           
+[115] bit_4.6.0              
