@@ -5262,6 +5262,568 @@ export_figure(
   height = 12
 )
 ```
+### Filtering out Group4 batch
+```{r exclude_group4_68runs}
+library(dplyr)
+library(QFeatures)
+
+# ------------------------------------------------------------
+# 1. Preserve original 83-run objects
+# ------------------------------------------------------------
+
+qf_models_83 <- qf_models
+sample_design_83 <- sample_design
+
+# ------------------------------------------------------------
+# 2. Define the 68 retained runs
+# ------------------------------------------------------------
+
+sample_design_68 <- sample_design_83 |>
+  filter(as.character(Batch) != "Group 4") |>
+  mutate(
+    Batch = droplevels(factor(Batch)),
+    Condition = droplevels(factor(Condition))
+  )
+
+runs_68 <- as.character(sample_design_68$Run)
+
+stopifnot(
+  nrow(sample_design_83) == 83,
+  length(runs_68) == 68,
+  !anyDuplicated(runs_68)
+)
+
+# ------------------------------------------------------------
+# 3. Filter every assay in each QFeatures object
+# ------------------------------------------------------------
+
+qf_models_68 <- lapply(qf_models_83, function(qf) {
+
+  # Subset each assay to the retained runs
+  for (assay_name in names(qf)) {
+
+    se <- qf[[assay_name]]
+
+    keep <- colnames(se) %in% runs_68
+
+    qf[[assay_name]] <- se[, keep, drop = FALSE]
+  }
+
+  qf
+})
+
+# ------------------------------------------------------------
+# 4. Verify sample counts and absence of Group 4
+# ------------------------------------------------------------
+
+sample_counts_68 <- data.frame(
+  Software = names(qf_models_68),
+  Samples = vapply(
+  qf_models_68,
+  function(qf) ncol(qf[["proteins"]]),
+  integer(1)
+)
+)
+
+print(sample_counts_68)
+
+stopifnot(
+  all(sample_counts_68$Samples == 68),
+  !any(as.character(sample_design_68$Batch) == "Group 4")
+)
+
+# ------------------------------------------------------------
+# 5. Check batch-adjusted experimental design
+# ------------------------------------------------------------
+
+design_matrix_68 <- model.matrix(
+  ~ 0 + Condition + Batch,
+  data = sample_design_68
+)
+
+design_check_68 <- data.frame(
+  Parameters = ncol(design_matrix_68),
+  Rank = qr(design_matrix_68)$rank,
+  Full_rank = qr(design_matrix_68)$rank ==
+    ncol(design_matrix_68)
+)
+
+print(design_check_68)
+
+if (!design_check_68$Full_rank) {
+  warning(
+    "The 68-run batch-adjusted design is not full rank. ",
+    "Review estimability before refitting models."
+  )
+}
+
+# ------------------------------------------------------------
+# 6. Save filtered objects for downstream analyses
+# ------------------------------------------------------------
+
+saveRDS(
+  list(
+    qf_models = qf_models_68,
+    sample_design = sample_design_68,
+    excluded_runs = setdiff(
+      sample_design_83$Run,
+      sample_design_68$Run
+    )
+  ),
+  file = file.path(results_cache_dir, "qf_models_68runs.rds")
+)
+
+cat("\n68-run QFeatures dataset prepared successfully.\n")
+```
+- Exclusion of acquisition Group 4 following biological quality control
+
+Biological quality control revealed an acquisition-batch-specific inconsistency in the expected c-Jun knockout phenotype. In Group 4, the anticipated reduction in JUN abundance in knockout (KO) relative to control (CTRL) samples was absent or reversed across the four DIA analysis pipelines. Examination of individual JUN peptides and proteome-wide genotype-associated signatures further supported this observation. In particular, leave-one-batch-out validation showed that Group 4 was the only acquisition batch consistently lacking the expected genotype-associated proteomic separation. Although these findings do not establish the underlying cause or confirm sample mislabeling, they raise concerns regarding the biological validity of the affected samples. Consequently, all 15 Group 4 runs were excluded from the primary downstream analyses, leaving 68 runs across eight experimental conditions. The supporting biological QC results are presented in Supplementary Figure S[X]. The original 83-run dataset was retained for sensitivity analyses.
+
+- Exploratory assessment of the retained 68-run dataset
+
+Following exclusion, protein-level multidimensional scaling (MDS), experimental condition–batch balance, and sample-to-sample Spearman correlations were reassessed using the 68 retained runs. These analyses were used to characterize the remaining batch-associated variation and evaluate the experimental design before differential abundance modeling.
+
+```{r}
+# ============================================================
+# Prepare protein assays for 68-run exploratory QC
+# ============================================================
+
+library(dplyr)
+library(ggplot2)
+library(SummarizedExperiment)
+
+software_order <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
+
+stopifnot(
+  all(software_order %in% names(qf_models_68)),
+  nrow(sample_design_68) == 68,
+  !anyDuplicated(sample_design_68$Run),
+  !any(as.character(sample_design_68$Batch) == "Group 4")
+)
+
+# Use the same 68 runs, in the same order, for every pipeline.
+# This also works if an earlier QFeatures filtering attempt
+# left some other assays unchanged.
+proteins_68 <- lapply(software_order, function(software) {
+
+  se <- qf_models_68[[software]][["proteins"]]
+
+  stopifnot(all(sample_design_68$Run %in% colnames(se)))
+
+  se <- se[, sample_design_68$Run, drop = FALSE]
+
+  stopifnot(
+    ncol(se) == 68,
+    identical(colnames(se), as.character(sample_design_68$Run))
+  )
+
+  se
+})
+
+names(proteins_68) <- software_order
+
+sample_design_68$Batch <- droplevels(
+  factor(
+    as.character(sample_design_68$Batch),
+    levels = c("Group 1", "Group 2", "Group 3",
+               "20260331")
+  )
+)
+
+print(data.frame(
+  Software = names(proteins_68),
+  Runs = vapply(proteins_68, ncol, integer(1))
+))
+```
+### Protein-level MDS - 68 runs
+```{r protein_mds_qc, fig.width=15, fig.height=11, message=FALSE, warning=FALSE}
+# ============================================================
+# Protein-level MDS: four DIA software packages
+# Complete-case proteins, 68 retained LC-MS runs
+# ============================================================
+
+mds_list <- list()
+mds_summary <- list()
+
+for (software in software_order) {
+
+  message("Running protein-level MDS: ", software)
+
+  se <- proteins_68[[software]]
+  x <- SummarizedExperiment::assay(se)
+
+  # Retain proteins quantified in all 68 runs
+  keep <- rowSums(is.finite(x)) == ncol(x)
+
+  se_complete <- se[keep, , drop = FALSE]
+
+  stopifnot(nrow(se_complete) >= 2L)
+
+  sce <- as(se_complete, "SingleCellExperiment")
+
+  sce <- scater::runMDS(
+    sce,
+    exprs_values = 1
+  )
+
+  coords <- as.data.frame(
+    SingleCellExperiment::reducedDim(sce, "MDS")
+  )
+
+  colnames(coords)[1:2] <- c("MDS1", "MDS2")
+
+  # Use the shared, verified sample design
+  metadata <- sample_design_68[
+    match(colnames(se_complete), sample_design_68$Run),
+    ,
+    drop = FALSE
+  ]
+
+  stopifnot(!anyNA(metadata$Run))
+
+  coords$Software <- software
+  coords$Run <- metadata$Run
+  coords$Condition <- as.character(metadata$Condition)
+  coords$Batch <- as.character(metadata$Batch)
+
+  mds_list[[software]] <- coords
+
+  mds_summary[[software]] <- data.frame(
+    Software = software,
+    Proteins_Used = sum(keep),
+    Runs = ncol(se_complete)
+  )
+}
+
+mds_qc <- dplyr::bind_rows(mds_list)
+mds_summary <- dplyr::bind_rows(mds_summary)
+
+print(mds_summary)
+
+mds_qc$Software <- factor(
+  mds_qc$Software,
+  levels = software_order
+)
+
+mds_qc$Batch <- factor(
+  mds_qc$Batch,
+  levels = levels(sample_design_68$Batch)
+)
+
+# ------------------------------------------------------------
+# Plot 1: MDS colored by experimental condition
+# ------------------------------------------------------------
+
+p_mds_condition <- ggplot2::ggplot(
+  mds_qc,
+  ggplot2::aes(
+    x = MDS1,
+    y = MDS2,
+    color = Condition
+  )
+) +
+  ggplot2::geom_point(
+    size = 2.5,
+    alpha = 0.6
+  ) +
+  ggplot2::facet_wrap(
+    ~ Software,
+    scales = "free",
+    ncol = 2
+  ) +
+  ggplot2::labs(
+    title = "Protein-level MDS by experimental condition",
+    subtitle = "68 retained runs per pipeline; complete-case MaxLFQ proteins",
+    x = "MDS dimension 1",
+    y = "MDS dimension 2",
+    color = "Condition"
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    strip.text = ggplot2::element_text(face = "bold")
+  )
+
+print(p_mds_condition)
+
+# ------------------------------------------------------------
+# Plot 2: MDS colored by acquisition batch
+# ------------------------------------------------------------
+
+p_mds_batch <- ggplot2::ggplot(
+  mds_qc,
+  ggplot2::aes(
+    x = MDS1,
+    y = MDS2,
+    color = Batch
+  )
+) +
+  ggplot2::geom_point(
+    size = 2.5,
+    alpha = 0.6
+  ) +
+  ggplot2::facet_wrap(
+    ~ Software,
+    scales = "free",
+    ncol = 2
+  ) +
+  ggplot2::labs(
+    title = "Protein-level MDS by acquisition batch",
+    subtitle = "68 retained runs across four acquisition batches",
+    x = "MDS dimension 1",
+    y = "MDS dimension 2",
+    color = "Acquisition batch"
+  ) +
+  ggplot2::theme_classic(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    strip.text = ggplot2::element_text(face = "bold")
+  )
+
+print(p_mds_batch)
+```
+### Experimental condition-batch balance - 68 runs
+```{r qc_condition_batch_balance, fig.width=12, fig.height=7, message=FALSE, warning=FALSE}
+# ============================================================
+# Experimental condition distribution across retained batches
+# ============================================================
+
+condition_batch_counts <- sample_design_68 |>
+  dplyr::count(
+    Condition,
+    Batch,
+    name = "N_Runs",
+    .drop = FALSE
+  )
+
+condition_batch_table <- condition_batch_counts |>
+  tidyr::pivot_wider(
+    names_from = Batch,
+    values_from = N_Runs,
+    values_fill = 0
+  )
+
+print(condition_batch_table)
+
+batch_coverage <- condition_batch_counts |>
+  dplyr::group_by(Condition) |>
+  dplyr::summarise(
+    Total_Runs = sum(N_Runs),
+    Batches_Represented = sum(N_Runs > 0),
+    .groups = "drop"
+  )
+
+print(batch_coverage)
+
+p_condition_batch <- ggplot2::ggplot(
+  condition_batch_counts,
+  ggplot2::aes(
+    x = Batch,
+    y = Condition,
+    fill = N_Runs
+  )
+) +
+  ggplot2::geom_tile(
+    color = "white",
+    linewidth = 0.7
+  ) +
+  ggplot2::geom_text(
+    ggplot2::aes(label = N_Runs),
+    size = 4
+  ) +
+  ggplot2::scale_fill_gradient(
+    low = "white",
+    high = "steelblue"
+  ) +
+  ggplot2::labs(
+    title = "Experimental condition distribution across acquisition batches",
+    subtitle = "68 retained LC-MS runs after Group 4 exclusion",
+    x = "Acquisition batch",
+    y = "Experimental condition",
+    fill = "Runs"
+  ) +
+  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    panel.grid = ggplot2::element_blank()
+  )
+
+print(p_condition_batch)
+
+# Check estimability of the additive condition + batch design
+design_68 <- stats::model.matrix(
+  ~ 0 + Condition + Batch,
+  data = sample_design_68
+)
+
+cat(
+  "\nDesign rank:",
+  qr(design_68)$rank,
+  "of",
+  ncol(design_68),
+  "\n"
+)
+
+stopifnot(qr(design_68)$rank == ncol(design_68))
+```
+
+### Protein level Spearman correlation matrices - 68 runs
+
+```{r qc_protein_spearman_correlation, fig.width=14, fig.height=12, message=FALSE, warning=FALSE}
+# ============================================================
+# Protein-level Spearman sample correlation matrices
+# 68 retained runs
+# ============================================================
+
+correlation_matrices <- list()
+correlation_plot_data <- list()
+correlation_summary <- list()
+
+ordered_runs <- sample_design_68$Run[
+  order(
+    sample_design_68$Batch,
+    sample_design_68$Condition,
+    sample_design_68$Run
+  )
+]
+
+batch_lookup <- setNames(
+  as.character(sample_design_68$Batch),
+  sample_design_68$Run
+)
+
+for (software in software_order) {
+
+  message("Calculating correlations: ", software)
+
+  se <- proteins_68[[software]]
+  x <- SummarizedExperiment::assay(se)
+
+  cor_mat <- stats::cor(
+    x,
+    method = "spearman",
+    use = "pairwise.complete.obs"
+  )
+
+  cor_mat <- cor_mat[
+    ordered_runs,
+    ordered_runs,
+    drop = FALSE
+  ]
+
+  correlation_matrices[[software]] <- cor_mat
+
+  plot_data <- as.data.frame(as.table(cor_mat))
+
+  colnames(plot_data) <- c(
+    "Run1", "Run2", "Correlation"
+  )
+
+  plot_data$Software <- software
+
+  correlation_plot_data[[software]] <- plot_data
+
+  # Summarize unique sample pairs (exclude diagonal)
+  pair_idx <- which(
+    upper.tri(cor_mat),
+    arr.ind = TRUE
+  )
+
+  pair_data <- data.frame(
+    Correlation = cor_mat[pair_idx],
+    Run1 = rownames(cor_mat)[pair_idx[, 1]],
+    Run2 = colnames(cor_mat)[pair_idx[, 2]]
+  )
+
+  pair_data$Same_Batch <-
+    batch_lookup[pair_data$Run1] ==
+    batch_lookup[pair_data$Run2]
+
+  correlation_summary[[software]] <- data.frame(
+    Software = software,
+    Median_Within_Batch = median(
+      pair_data$Correlation[pair_data$Same_Batch],
+      na.rm = TRUE
+    ),
+    Median_Between_Batch = median(
+      pair_data$Correlation[!pair_data$Same_Batch],
+      na.rm = TRUE
+    ),
+    Minimum_Correlation = min(
+      pair_data$Correlation,
+      na.rm = TRUE
+    ),
+    Median_Correlation = median(
+      pair_data$Correlation,
+      na.rm = TRUE
+    )
+  )
+}
+
+correlation_plot_data <- dplyr::bind_rows(
+  correlation_plot_data
+)
+
+correlation_summary <- dplyr::bind_rows(
+  correlation_summary
+)
+
+print(correlation_summary)
+
+correlation_plot_data$Run1 <- factor(
+  correlation_plot_data$Run1,
+  levels = ordered_runs
+)
+
+correlation_plot_data$Run2 <- factor(
+  correlation_plot_data$Run2,
+  levels = rev(ordered_runs)
+)
+
+correlation_plot_data$Software <- factor(
+  correlation_plot_data$Software,
+  levels = software_order
+)
+
+p_correlation <- ggplot2::ggplot(
+  correlation_plot_data,
+  ggplot2::aes(
+    x = Run1,
+    y = Run2,
+    fill = Correlation
+  )
+) +
+  ggplot2::geom_tile() +
+  ggplot2::facet_wrap(
+    ~ Software,
+    ncol = 2
+  ) +
+  ggplot2::scale_fill_viridis_c(
+    option = "viridis",
+    limits = c(0, 1),
+    na.value = "grey90"
+  ) +
+  ggplot2::coord_fixed() +
+  ggplot2::labs(
+    title = "Protein-level Spearman correlation matrices",
+    subtitle = "68 retained runs per pipeline, ordered by acquisition batch",
+    x = "LC-MS run",
+    y = "LC-MS run",
+    fill = "Spearman\ncorrelation"
+  ) +
+  ggplot2::theme_minimal(base_size = 11) +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_blank(),
+    axis.text.y = ggplot2::element_blank(),
+    axis.ticks = ggplot2::element_blank(),
+    panel.grid = ggplot2::element_blank(),
+    strip.text = ggplot2::element_text(face = "bold"),
+    plot.title = ggplot2::element_text(face = "bold")
+  )
+
+print(p_correlation)
+```
+
 
 
 # Data modeling
