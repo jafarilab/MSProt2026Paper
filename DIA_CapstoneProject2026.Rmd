@@ -153,6 +153,73 @@ software_names <- names(input_files)
 
 ```
 
+```{r restore_jun_data_68, message=FALSE}
+library(dplyr)
+library(SummarizedExperiment)
+
+# Load the previously saved 68-run dataset
+# Restore the saved 68-run dataset
+jun_file_68 <- "/Users/nvd448/Documents/MSProt2026/R_cache/statistical_results/qf_models_68runs.rds"
+
+stopifnot(file.exists(jun_file_68))
+
+jun_cache_68 <- readRDS(jun_file_68)
+
+# Inspect the saved object structure before extracting data
+print(names(jun_cache_68))
+qf_models_68 <- jun_cache_68$qf_models
+sample_design_68 <- jun_cache_68$sample_design
+
+software_order_68 <- c(
+  "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
+)
+
+# Keep CTRL and KO at baseline, 6h and 24h.
+# Explicitly exclude JNK inhibitor samples.
+jun_conditions_68 <- c(
+  "CTRL_Untreated_Baseline",
+  "KO_Untreated_Baseline",
+  "CTRL_cDDP_6h",
+  "KO_cDDP_6h",
+  "CTRL_cDDP_24h",
+  "KO_cDDP_24h"
+)
+
+jun_sample_design_68 <- sample_design_68 |>
+  dplyr::filter(
+    as.character(Condition) %in% jun_conditions_68
+  )
+
+stopifnot(
+  nrow(sample_design_68) == 68,
+  all(jun_conditions_68 %in% as.character(sample_design_68$Condition)),
+  !any(grepl("JNK", jun_sample_design_68$Condition)),
+  all(software_order_68 %in% names(qf_models_68))
+)
+
+# Verify the six selected groups and their acquisition batches
+print(
+  jun_sample_design_68 |>
+    dplyr::count(Condition, Batch, name = "Runs")
+)
+
+# Confirm required assays are available
+print(
+  data.frame(
+    Software = software_order_68,
+    Protein_assay = vapply(
+      qf_models_68[software_order_68],
+      function(x) "proteins" %in% names(x),
+      logical(1)
+    ),
+    Precursor_assay = vapply(
+      qf_models_68[software_order_68],
+      function(x) "precursors_norm" %in% names(x),
+      logical(1)
+    )
+  )
+)
+```
 
 ## 2. Load & clean
 Import the software-specific outputs and standardize precursor identifiers, sample names, intensity columns, and metadata. Duplicate precursor–run records are resolved using intensity availability and identification scores, where applicable. Zero intensities are treated as missing values (NA), while nonzero intensities are preserved. Basic QC statistics, including precursor counts, duplicate records, and missing values, are reported for each software.
@@ -13021,6 +13088,7 @@ gc(verbose = FALSE)
 ```
 Abundance-dependent precision was evaluated across 7,483 proteins shared by all four DIA pipelines using model residual standard deviations across ten within-pipeline abundance deciles. Following exclusion of Group 4, the overall precision patterns remained consistent with the original 83-run analysis. AlphaDIA and DIA-NN maintained comparatively low residual variability, with median SDs decreasing from 0.207 and 0.211 in the lowest abundance decile to 0.118 and 0.100 in the highest decile, respectively. MaxDIA exhibited consistently higher residual variability across the abundance range (0.437–0.298). Spectronaut showed the strongest abundance dependence, with residual SD decreasing from 0.617 to 0.130, representing a 4.73-fold difference. Its particularly elevated variability among low-abundance proteins persisted despite the earlier correction of intensity values equal to 1. Overall, exclusion of Group 4 did not materially alter the relative precision characteristics of the four pipelines, supporting the robustness of these pipeline-level observations to the sample exclusion.
 
+
 # Publication-ready multipanel figures
 
 ```{r manuscript_export_setup, eval=FALSE}
@@ -13668,30 +13736,514 @@ print(fig8_68)
 ```
 **Figure 8. Cross-pipeline agreement, temporal genotype-dependent cisplatin responses, and within-condition quantitative variability across four DIA proteomics analysis pipelines.** (A) Distribution of protein groups according to the number of pipelines detecting a significant genotype-by-treatment interaction, restricted to 7,460 proteins tested by all four pipelines. Significance was defined using Benjamini–Hochberg-adjusted p-values < 0.05. Among these proteins, 5,488 showed no significant interaction, whereas 1,342, 407, 207, and 16 were significant in one, two, three, or all four pipelines, respectively. (B) Temporal classification of the 16 protein groups with significant joint interaction tests in all four pipelines, based on individual interaction tests at 6 and 24 h. (C) Genotype-dependent cisplatin response effect sizes for these 16 protein groups at 24 h and 6 h, expressed as KO minus CTRL responses on the log2 scale. Gray lines connect corresponding protein groups across pipelines, and the dashed horizontal line indicates zero interaction effect. (D) Within-condition quantitative variability, measured as the standard deviation of log2 protein abundance among biological replicates within the same experimental condition and acquisition batch. Boxplots show the median and interquartile range. All analyses used the 68 retained runs, with acquisition batch included in the statistical models. Because 6 h and 24 h treated samples were acquired in different batches, cross-timepoint comparisons require cautious interpretation.
 
+## Fig 9: JUN abundance across four DIA pipelines
+```{r figure_9_export_data_68, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(openxlsx)
+
+# ============================================================
+# Figure 9: Export all underlying numerical data
+# ============================================================
+
+fig9_data_dir_68 <- file.path(
+  cache_dir, "manuscript_figures"
+)
+
+dir.create(
+  fig9_data_dir_68,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ------------------------------------------------------------
+# Panels A and B: JUN abundance per sample
+# ------------------------------------------------------------
+
+fig9_AB_data_68 <- jun_data_fig9_68 |>
+  dplyr::select(
+    Level, Software, Run, Genotype,
+    Treatment, Batch, Abundance,
+    dplyr::any_of("N_Precursors")
+  ) |>
+  dplyr::arrange(Level, Software, Treatment, Genotype, Run)
+
+# ------------------------------------------------------------
+# Panel C: Treatment-specific JUN log2FC
+# ------------------------------------------------------------
+
+fig9_C_data_68 <- jun_specific_fc_68 |>
+  dplyr::select(
+    Level, Software, Treatment,
+    log2FC, Lower, Upper,
+    P_value, FDR, Significant, N
+  ) |>
+  dplyr::arrange(Level, Treatment, Software)
+
+# ------------------------------------------------------------
+# Panel D: Overall adjusted JUN log2FC
+# ------------------------------------------------------------
+
+fig9_D_data_68 <- jun_combined_fc_68 |>
+  dplyr::select(
+    Level, Software,
+    log2FC, Lower, Upper,
+    P_value, FDR, Significant, N
+  ) |>
+  dplyr::arrange(Level, Software)
+
+# ------------------------------------------------------------
+# Panel E: JUN protein abundance and within-pipeline z-scores
+# Reconstruct values from the same existing measurements
+# ------------------------------------------------------------
+
+fig9_E_data_68 <- jun_protein_68 |>
+  dplyr::inner_join(
+    jun_design_68 |>
+      dplyr::select(
+        Run, Genotype, Treatment, Batch
+      ),
+    by = "Run"
+  ) |>
+  dplyr::group_by(Software) |>
+  dplyr::mutate(
+    JUN_zscore = as.numeric(scale(Abundance))
+  ) |>
+  dplyr::ungroup() |>
+  dplyr::arrange(Software, Run)
+
+# Save independent clustering order for each pipeline
+fig9_E_cluster_order_68 <- dplyr::bind_rows(
+  lapply(seq_along(software_order_68), function(i) {
+
+    sw <- software_order_68[i]
+
+    d <- fig9_E_data_68 |>
+      dplyr::filter(Software == sw)
+
+    meta <- jun_design_68 |>
+      dplyr::arrange(Run)
+
+    z <- d$JUN_zscore[match(meta$Run, d$Run)]
+
+    # Same clustering input as the original heatmap:
+    # non-finite values replaced by zero for clustering only
+    cluster_z <- z
+    cluster_z[!is.finite(cluster_z)] <- 0
+
+    hc <- stats::hclust(
+      stats::dist(matrix(cluster_z, ncol = 1)),
+      method = "ward.D2"
+    )
+
+    data.frame(
+      Software = sw,
+      Cluster_position = seq_along(hc$order),
+      Run = meta$Run[hc$order]
+    )
+  })
+)
+
+# ------------------------------------------------------------
+# Panel F: ROC coordinates and AUC
+# ------------------------------------------------------------
+
+fig9_F_ROC_data_68 <- jun_roc_plot_data_68 |>
+  dplyr::select(
+    Software, FPR, Sensitivity,
+    dplyr::any_of("Specificity")
+  ) |>
+  dplyr::arrange(Software, FPR, Sensitivity)
+
+fig9_F_AUC_data_68 <- jun_auc_summary_68 |>
+  dplyr::arrange(dplyr::desc(AUC))
+
+# ------------------------------------------------------------
+# Export all sheets into one Excel workbook
+# ------------------------------------------------------------
+
+fig9_data_file_68 <- file.path(
+  fig9_data_dir_68,
+  "Figure_9_JUN_Source_Data_68.xlsx"
+)
+
+fig9_wb_68 <- openxlsx::createWorkbook()
+
+fig9_sheets_68 <- list(
+  "AB_JUN_Abundance" = fig9_AB_data_68,
+  "C_Treatment_log2FC" = fig9_C_data_68,
+  "D_Overall_log2FC" = fig9_D_data_68,
+  "E_JUN_Zscores" = fig9_E_data_68,
+  "E_Cluster_Order" = fig9_E_cluster_order_68,
+  "F_ROC_Coordinates" = fig9_F_ROC_data_68,
+  "F_AUC" = fig9_F_AUC_data_68
+)
+
+for (sheet_name in names(fig9_sheets_68)) {
+
+  openxlsx::addWorksheet(
+    fig9_wb_68,
+    sheet_name
+  )
+
+  openxlsx::writeData(
+    fig9_wb_68,
+    sheet = sheet_name,
+    x = fig9_sheets_68[[sheet_name]],
+    withFilter = TRUE
+  )
+
+  openxlsx::freezePane(
+    fig9_wb_68,
+    sheet = sheet_name,
+    firstRow = TRUE
+  )
+
+  openxlsx::setColWidths(
+    fig9_wb_68,
+    sheet = sheet_name,
+    cols = seq_len(ncol(fig9_sheets_68[[sheet_name]])),
+    widths = "auto"
+  )
+}
+
+openxlsx::saveWorkbook(
+  fig9_wb_68,
+  fig9_data_file_68,
+  overwrite = TRUE
+)
+
+cat("Figure 9 source data saved to:\n",
+    fig9_data_file_68, "\n")
+
+print(
+  data.frame(
+    Sheet = names(fig9_sheets_68),
+    Rows = vapply(fig9_sheets_68, nrow, integer(1))
+  )
+)
+```
+
+```{r figure_9_six_panel_layout_68, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(grid)
+library(gridExtra)
+library(ComplexHeatmap)
+library(circlize)
+
+# ============================================================
+# A and B: JUN protein and precursor abundance
+# Four software facets arranged 2 x 2 within each panel
+# ============================================================
+
+p9A_final_68 <- p9b_68 +
+  facet_wrap(~ Software, ncol = 2, scales = "free_y") +
+  labs(title = NULL, y = "JUN protein abundance\n(log2)") +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 9),
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text = element_text(size = 9),
+    axis.title = element_text(size = 10)
+  )
+
+p9B_final_68 <- p9c_68 +
+  facet_wrap(~ Software, ncol = 2, scales = "free_y") +
+  labs(title = NULL, y = "Median JUN precursor\nabundance (log2)") +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 9),
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text = element_text(size = 9),
+    axis.title = element_text(size = 10)
+  )
+
+# ============================================================
+# C: Treatment-specific JUN log2FC heatmap
+# ============================================================
+
+p9C_final_68 <- p9a_68 +
+  labs(title = NULL, subtitle = "* FDR < 0.05") +
+  theme(
+    axis.text.x = element_text(
+      angle = 25, hjust = 1, size = 9
+    ),
+    axis.text.y = element_text(size = 9),
+    strip.text = element_text(size = 10, face = "bold"),
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 9)
+  )
+
+# ============================================================
+# D: Overall JUN KO effect with 95% CI
+# ============================================================
+
+p9D_final_68 <- p9d_68 +
+  labs(title = NULL) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text = element_text(size = 9),
+    axis.title = element_text(size = 10),
+    legend.position = "bottom",
+    legend.text = element_text(size = 9)
+  )
+
+# ============================================================
+# E: Four independent heatmaps, shared horizontal legends
+# Reuse heatmap_grobs_68 from the existing Figure 9E chunk
+# ============================================================
+
+# Compact heatmaps in a 2 x 2 arrangement
+heatmap_grid_final_68 <- gridExtra::arrangeGrob(
+  grobs = heatmap_grobs_68,
+  ncol = 2
+)
+
+# Shared horizontal legends
+legend_z_68 <- ComplexHeatmap::Legend(
+  title = "JUN z-score",
+  col_fun = circlize::colorRamp2(
+    c(-2.5, 0, 2.5),
+    c("#2166AC", "white", "#B2182B")
+  ),
+  direction = "horizontal",
+  legend_width = grid::unit(3.0, "cm"),
+  title_gp = grid::gpar(fontsize = 9),
+  labels_gp = grid::gpar(fontsize = 8)
+)
+
+legend_genotype_68 <- ComplexHeatmap::Legend(
+  title = "Genotype",
+  at = names(annotation_colors_68$Genotype),
+  legend_gp = grid::gpar(
+    fill = annotation_colors_68$Genotype
+  ),
+  nrow = 1,
+  title_gp = grid::gpar(fontsize = 9),
+  labels_gp = grid::gpar(fontsize = 8),
+  grid_width = grid::unit(3, "mm"),
+  grid_height = grid::unit(3, "mm")
+)
+
+legend_treatment_68 <- ComplexHeatmap::Legend(
+  title = "Treatment",
+  at = names(annotation_colors_68$Treatment),
+  legend_gp = grid::gpar(
+    fill = annotation_colors_68$Treatment
+  ),
+  nrow = 1,
+  title_gp = grid::gpar(fontsize = 9),
+  labels_gp = grid::gpar(fontsize = 8),
+  grid_width = grid::unit(3, "mm"),
+  grid_height = grid::unit(3, "mm")
+)
+
+legend_batch_68 <- ComplexHeatmap::Legend(
+  title = "Batch",
+  at = names(annotation_colors_68$Batch),
+  legend_gp = grid::gpar(
+    fill = annotation_colors_68$Batch
+  ),
+  nrow = 2,
+  title_gp = grid::gpar(fontsize = 9),
+  labels_gp = grid::gpar(fontsize = 8),
+  grid_width = grid::unit(3, "mm"),
+  grid_height = grid::unit(3, "mm")
+)
+
+# Arrange shared legends in two horizontal rows
+legend_top_68 <- ComplexHeatmap::packLegend(
+  legend_z_68,
+  legend_genotype_68,
+  direction = "horizontal",
+  gap = grid::unit(5, "mm")
+)
+
+legend_bottom_68 <- ComplexHeatmap::packLegend(
+  legend_treatment_68,
+  legend_batch_68,
+  direction = "horizontal",
+  gap = grid::unit(5, "mm")
+)
+
+legend_top_grob_68 <- grid::grid.grabExpr(
+  ComplexHeatmap::draw(
+    legend_top_68,
+    x = grid::unit(0.5, "npc"),
+    y = grid::unit(0.5, "npc"),
+    just = c("center", "center")
+  )
+)
+
+legend_bottom_grob_68 <- grid::grid.grabExpr(
+  ComplexHeatmap::draw(
+    legend_bottom_68,
+    x = grid::unit(0.5, "npc"),
+    y = grid::unit(0.5, "npc"),
+    just = c("center", "center")
+  )
+)
+
+# Heatmaps above, horizontal legends below
+fig9E_grob_68 <- gridExtra::arrangeGrob(
+  heatmap_grid_final_68,
+  legend_top_grob_68,
+  legend_bottom_grob_68,
+  ncol = 1,
+  heights = c(8, 1, 1.3)
+)
+
+p9E_final_68 <- patchwork::wrap_elements(
+  full = fig9E_grob_68
+)
+# ============================================================
+# PANEL E: Thin annotation tracks and enlarge JUN heatmap
+# ============================================================
+
+resize_jun_heatmap_68 <- function(gt) {
+
+  layout_names <- gt$layout$name
+
+  # pheatmap gtable rows:
+  # col_annotation = annotation strips
+  # matrix         = JUN abundance row
+  annotation_rows <- which(
+    grepl("col_annotation", layout_names)
+  )
+
+  matrix_rows <- which(
+    layout_names == "matrix"
+  )
+
+  if (length(annotation_rows) > 0) {
+    idx <- unique(gt$layout$t[annotation_rows])
+    gt$heights[idx] <- grid::unit(0.16, "cm")
+  }
+
+  if (length(matrix_rows) > 0) {
+    idx <- unique(gt$layout$t[matrix_rows])
+    gt$heights[idx] <- grid::unit(1.15, "cm")
+  }
+
+  gt
+}
+
+heatmap_grobs_compact_68 <- lapply(
+  heatmap_grobs_68,
+  resize_jun_heatmap_68
+)
+
+heatmap_grid_compact_68 <- gridExtra::arrangeGrob(
+  grobs = heatmap_grobs_compact_68,
+  ncol = 2
+)
+
+# Keep the shared horizontal legends created previously
+fig9E_compact_grob_68 <- gridExtra::arrangeGrob(
+  heatmap_grid_compact_68,
+  legend_top_grob_68,
+  legend_bottom_grob_68,
+  ncol = 1,
+  heights = c(8, 1, 1.3)
+)
+
+p9E_final_68 <- patchwork::wrap_elements(
+  full = fig9E_compact_grob_68
+)
 
 
+# ============================================================
+# F: ROC curves, highest AUC first in bottom-right legend
+# ============================================================
 
+auc_order_68 <- jun_auc_summary_68$Software[
+  order(jun_auc_summary_68$AUC, decreasing = TRUE)
+]
 
+auc_labels_68 <- setNames(
+  sprintf(
+    "%s (%.3f)",
+    jun_auc_summary_68$Software,
+    jun_auc_summary_68$AUC
+  ),
+  jun_auc_summary_68$Software
+)
 
+p9F_final_68 <- p9f_roc_68 +
+  scale_colour_manual(
+    values = software_colors,
+    breaks = auc_order_68,
+    labels = auc_labels_68[auc_order_68]
+  ) +
+  labs(
+    title = NULL,
+    subtitle = NULL,
+    colour = NULL
+  ) +
+  theme(
+    legend.position = c(0.98, 0.02),
+    legend.justification = c(1, 0),
+    legend.background = element_rect(
+      fill = scales::alpha("white", 0.9),
+      colour = "grey80"
+    ),
+    legend.text = element_text(size = 9),
+    legend.key.width = grid::unit(0.7, "cm"),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 11)
+  )
 
+# ============================================================
+# FINAL FIGURE 9: 2 columns x 3 rows
+# ============================================================
 
+fig9_final_68 <- (
+  (p9A_final_68 | p9B_final_68) /
+  (p9C_final_68 | p9D_final_68) /
+  (p9E_final_68 | p9F_final_68)
+) +
+  plot_layout(
+    widths = c(1, 1),
+    heights = c(1.3, 1.0, 1.4)
+  ) +
+  plot_annotation(
+    tag_levels = "A"
+  ) &
+  theme(
+    plot.tag = element_text(
+      size = 18,
+      face = "bold"
+    ),
+    plot.tag.position = c(0, 1),
+    plot.margin = margin(8, 8, 8, 8)
+  )
 
+print(fig9_final_68)
 
+# Export as one manuscript figure
+export_figure(
+  fig9_final_68,
+  "Figure_9_JUN_Six_Panels_68",
+  width = 10,
+  height = 12
+)
+```
 
+**Figure 9. Cross-pipeline assessment of JUN depletion and genotype discrimination in the 68-run DIA proteomics dataset.**
 
+**(A–B)** Distribution of normalized log2 JUN abundance at the protein (A) and precursor (B) levels across AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Samples are grouped by genotype (CTRL or JUN KO), with point shapes indicating untreated baseline, 6 h cisplatin, or 24 h cisplatin treatment. Each point represents one biological sample/run. Precursor-level abundance represents the median normalized log2 intensity of quantified JUN precursors within each sample. Boxplots indicate the median and interquartile range, with whiskers extending to 1.5 times the interquartile range.
 
+**(C)** Treatment-specific JUN log2 fold changes (KO − CTRL) for protein- and precursor-level quantification. Estimates were obtained using linear models adjusting for experimental batch where applicable. Tile colors indicate the magnitude of the genotype effect, and numerical labels report the estimated log2 fold changes. Asterisks denote Benjamini–Hochberg-adjusted false discovery rates (FDR) below 0.05 across the 24 comparisons.
 
+**(D)** Overall JUN knockout effects estimated separately for each DIA pipeline and quantification level using linear models including genotype, treatment, and batch. Points represent adjusted KO − CTRL log2 fold changes, and horizontal error bars indicate 95% confidence intervals. Green points denote FDR < 0.05 after Benjamini–Hochberg correction across eight comparisons.
 
+**(E)** Independent hierarchical clustering of JUN protein abundance across samples for each DIA pipeline. Within-pipeline standardized JUN abundances (z-scores) are displayed as heatmaps, with samples clustered using Euclidean distance and Ward's minimum-variance method (Ward.D2). Annotation tracks indicate experimental batch, treatment, and genotype. Missing abundance values are shown in gray and assigned a standardized value of zero for clustering only.
 
+**(F)** Receiver operating characteristic (ROC) curves evaluating the ability of JUN protein abundance to discriminate JUN KO from CTRL samples. Curves were calculated using the 54 samples with finite JUN protein measurements shared across all four pipelines. Lower JUN abundance was used as the predictor of KO status. Legend values indicate the area under the ROC curve (AUC), ordered from highest to lowest.
 
-
-
-
-
-
-
-
-
+JNK inhibitor-treated samples were excluded from all analyses, leaving 56 samples for the abundance and clustering analyses, subject to pipeline-specific missing measurements. ROC comparisons were restricted to the 54 samples quantified by all four pipelines.
 
 
 
