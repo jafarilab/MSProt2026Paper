@@ -1528,27 +1528,6 @@ Following precursor-level filtering, intensity values were log2-transformed usin
 # Log2 precursor intensity distributions before normalization
 # 84 runs per software, displayed as overlaid histograms
 # ============================================================
-<<<<<<< HEAD
-# rm(list = setdiff(ls(), c("cache_dir", "software_names", "filtered_qf_files")))
-invisible(gc(verbose = FALSE))
-
-qf_list <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-set.seed(123)
-
-hist_data <- list()
-file_keys <- c(
-  "AlphaDIA"    = "AlphaDIA",
-  "DIA-NN"      = "DIANN",
-  "Spectronaut" = "Spectronaut",
-  "MaxDIA"      = "MaxDIA"
-)
-for (software in names(qf_list)) {
-=======
 rm(list = setdiff(ls(), c("cache_dir", "software_names")))
 invisible(gc(verbose = FALSE))
 
@@ -1560,20 +1539,14 @@ filtered_qf_files <- setNames(
 density_data <- list()
 
 for (software in software_names) {
->>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
 
   cat("\nCalculating densities for ", software, "...\n", sep = "")
   
   # Load existing filtered QFeatures
-<<<<<<< HEAD
-  qf_one <- readRDS(filtered_qf_files[[file_keys[[software]]]])
-  se <- qf_one[["precursors_log"]]
-=======
   qf_one <- readRDS(filtered_qf_files[[software]])
   
   se <- qf_one[["precursors_log"]]
   x <- SummarizedExperiment::assay(se, withDimnames = FALSE)
->>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
 
   # Calculate density separately for each run
   run_densities <- lapply(seq_len(ncol(x)), function(j) {
@@ -1613,30 +1586,11 @@ density_data <- dplyr::bind_rows(density_data) %>%
   mutate(Software = factor(Software, levels = software_names))
 
 # Plot all 84 run distributions for each software
-<<<<<<< HEAD
-p_hist_all <- ggplot2::ggplot(
-  hist_data,
-  ggplot2::aes(
-    x = Log2_Intensity,
-    group = Run
-  )
-) +
-  ggplot2::geom_histogram(
-    ggplot2::aes(y = ggplot2::after_stat(density)),
-    bins = 70,
-    position = "identity",
-    fill = NA,
-    color = "#277DA1",
-    linewidth = 0.25,
-    alpha = 0.3
-  ) +
-=======
 ggplot2::ggplot(density_data,
   ggplot2::aes(x = Log2_Intensity, y = Density, color = Software,
                group = interaction(Software, Run))) +
   ggplot2::geom_line(
     linewidth = 0.35, alpha = 0.3, show.legend = FALSE) +
->>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
   ggplot2::facet_wrap(
     ~ Software, scales = "free_y", ncol = 2) +
   ggplot2::labs(
@@ -1695,36 +1649,6 @@ for (software in software_names) {
 
   breaks <- seq(value_range[1], value_range[2], length.out = 70 + 1L)
 
-<<<<<<< HEAD
-p_hist_all_onePlot <- ggplot2::ggplot(
-  density_data,
-  ggplot2::aes(
-    x = Log2_Intensity,
-    color = Software,
-    fill = Software
-  )
-) +
-  ggplot2::geom_density(
-    linewidth = 1.1,
-    alpha = 0.22,
-    adjust = 1
-  ) +
-  ggplot2::scale_x_continuous(
-    limits = c(
-      min(-2, min(density_data$Log2_Intensity) - 2),
-      NA
-    ),
-    expand = ggplot2::expansion(mult = c(0, 0.02))
-  ) +
-  ggplot2::labs(
-    title = "Pre-normalization precursor intensity distributions",
-    subtitle = "Pooled log2 intensities across 84 LC-MS runs per software",
-    x = "Log2 precursor intensity",
-    y = "Density",
-    color = "Software",
-    fill = "Software"
-  ) +
-=======
   # ----------------------------------------------------------
   # Count ALL precursor intensities in each bin
   # ----------------------------------------------------------
@@ -1762,17 +1686,11 @@ ggplot2::ggplot(hist_data,
                 subtitle = paste0("84 LC-MS runs per software; exact histogram counts ",
                                   "from all finite precursor intensities"),
                 x = "Log2 precursor intensity", y = "Number of precursors") +
->>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
   ggplot2::theme_classic(base_size = 12) +
   ggplot2::theme(
     strip.text = ggplot2::element_text(face = "bold"),
     plot.title = ggplot2::element_text(face = "bold")
   )
-<<<<<<< HEAD
-
-#rm(density_data)
-=======
->>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
 ```
 Unlike the other three software packages, Spectronaut has a distinctly multimodal intensity distribution, including a sharp peak near log2 intensity = 0 and a broader low-intensity population between approximately 2 and 7. This is particularly suspicious because almost every Spectronaut precursor has a reported intensity in all 84 runs, despite IsImputed = False throughout.
 
@@ -2356,84 +2274,12 @@ print(exclusion_summary)
 The results strengthen the justification for excluding Group1_c-jun_KO_1, particularly for DIA-NN and MaxDIA (Run chunk 26 to re-check).
 
 
-<<<<<<< HEAD
-```{r}
-qf_list <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-
-set.seed(123)
-
-density_norm <- dplyr::bind_rows(
-  lapply(names(qf_list), function(software) {
-
-    x <- as.vector(
-      SummarizedExperiment::assay(
-        qf_list[[software]][["precursors_norm"]]
-      )
-    )
-
-    x <- x[is.finite(x)]
-
-    if (length(x) > 100000)
-      x <- sample(x, 100000)
-
-    data.frame(
-      Software = software,
-      Log2_Intensity = x
-    )
-  })
-)
-
-p_hist_norm_onePlot <- ggplot2::ggplot(
-  density_norm,
-  ggplot2::aes(
-    x = Log2_Intensity,
-    color = Software,
-    fill = Software
-  )
-) +
-  ggplot2::geom_density(
-    linewidth = 1.1,
-    alpha = 0.22,
-    adjust = 1
-  ) +
-  ggplot2::scale_x_continuous(
-    limits = c(
-      min(-2, min(density_norm$Log2_Intensity) - 2),
-      NA
-    ),
-    expand = ggplot2::expansion(mult = c(0, 0.02))
-  ) +
-  ggplot2::labs(
-    title = "Post-normalization precursor intensity distributions",
-    subtitle = "Pooled normalized log2 intensities across 83 LC-MS runs per software",
-    x = "Normalized log2 precursor intensity",
-    y = "Density",
-    color = "Software",
-    fill = "Software"
-  ) +
-  ggplot2::theme_classic(base_size = 12) +
-  ggplot2::theme(
-    plot.title = ggplot2::element_text(face = "bold"),
-    legend.position = "top",
-    legend.title = ggplot2::element_blank()
-  )
-```
-
-
-## NIMAA analysis of precursor detection
-=======
 ## 14. NIMAA analysis of precursor detection
->>>>>>> b6fcb7a (Updated to the 'Vis Max Rectangles' chunk)
 
 Precursor detection was represented as a binary precursor-by-run matrix (observed = 1; missing = 0). The NIMAA-style `Rectangular_element_max` method was applied to all precursor features to identify a fully observed rectangular submatrix. The efficient implementation was checked against the original NIMAA output on a 5,000-precursor test matrix.
 
 
-### - nimaa-fast-functions
+### - Nimaa functions
 
 ```{r nimaaFunctions}
 rm(list = setdiff(ls(), c("cache_dir", "software_names")))
@@ -2745,6 +2591,7 @@ nimaa_precursor_figure
 ```
 
 ### - Vis lollipop
+there is no nimaa_lollipop_data
 
 ```{r nimaa-precursor-summary-lollipop, eval=FALSE, fig.width=12, fig.height=5.5, dpi=300}
 
@@ -2820,9 +2667,9 @@ ggsave(
 )
 ```
 
-```{r nimaa-nestedness-repeated, eval=run_analysis, eval=FALSE}
-library(dplyr)
-library(ggplot2)
+### - Nestedness
+
+```{r nimaa-nestedness-repeated, eval=run_analysis, eval=FALSE, fig.width=10, fig.height=6, dpi=300}
 
 set.seed(42)
 
@@ -2837,9 +2684,7 @@ nimaa_nestedness_repeated <- dplyr::bind_rows(
     dplyr::bind_rows(
       lapply(seq_len(n_repeats), function(i) {
 
-        message(
-          software, " | repetition ", i, "/", n_repeats
-        )
+        message(software, " | repetition ", i, "/", n_repeats)
 
         selected <- sample.int(
           nrow(x),
@@ -2865,32 +2710,20 @@ nimaa_nestedness_repeated <- dplyr::bind_rows(
 # Summarise repeated nestedness estimates
 nimaa_nestedness_summary <- nimaa_nestedness_repeated |>
   group_by(Software) |>
-  summarise(
-    Mean_temperature = mean(Nestedness_temperature, na.rm = TRUE),
-    SD_temperature = sd(Nestedness_temperature, na.rm = TRUE),
-    Min_temperature = min(Nestedness_temperature, na.rm = TRUE),
-    Max_temperature = max(Nestedness_temperature, na.rm = TRUE),
-    .groups = "drop"
-  ) |>
-  mutate(
-    across(
-      c(Mean_temperature, SD_temperature,
-        Min_temperature, Max_temperature),
-      ~ round(.x, 2)
-    )
-  )
+  summarise(Mean_temperature = mean(Nestedness_temperature, na.rm = TRUE),
+            SD_temperature = sd(Nestedness_temperature, na.rm = TRUE),
+            Min_temperature = min(Nestedness_temperature, na.rm = TRUE),
+            Max_temperature = max(Nestedness_temperature, na.rm = TRUE),
+            .groups = "drop") |>
+  mutate(across(c(Mean_temperature, SD_temperature,
+                  Min_temperature, Max_temperature),
+                ~ round(.x, 2)))
 
 print(as.data.frame(nimaa_nestedness_summary), row.names = FALSE)
-```
 
-```{r nimaa-nestedness-boxplot, eval=FALSE, fig.width=10, fig.height=6, dpi=300}
-library(ggplot2)
-library(dplyr)
-
-pipeline_order <- c(
-  "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
-)
-
+# ---------------------------------------
+# ----- visualizing -----------------
+# -------------------------------
 # Use unrounded values for plotting
 nestedness_plot_summary <- nimaa_nestedness_repeated |>
   group_by(Software) |>
@@ -2900,13 +2733,13 @@ nestedness_plot_summary <- nimaa_nestedness_repeated |>
     .groups = "drop"
   ) |>
   mutate(
-    Software = factor(Software, levels = rev(pipeline_order)),
+    Software = factor(Software, levels = rev(names(nimaa_incidence))),
     Label = sprintf("%.2f ± %.2f", Mean, SD)
   )
 
 nestedness_plot_data <- nimaa_nestedness_repeated |>
   mutate(
-    Software = factor(Software, levels = rev(pipeline_order))
+    Software = factor(Software, levels = rev(names(nimaa_incidence)))
   )
 
 nimaa_nestedness_figure <- ggplot() +
@@ -2940,8 +2773,8 @@ nimaa_nestedness_figure <- ggplot() +
   geom_text(
     data = nestedness_plot_summary,
     aes(x = Mean + SD + 0.8, y = Software, label = Label),
-    hjust = 0,
-    vjust = 0.5,
+    hjust = 0.5,
+    vjust = -0.5,
     size = 4.5
   ) +
   scale_colour_manual(values = software_colors) +
@@ -2961,23 +2794,15 @@ nimaa_nestedness_figure <- ggplot() +
     legend.position = "none",
     plot.title = element_text(face = "bold", size = 17),
     plot.subtitle = element_text(size = 12),
-    axis.text.y = element_text(face = "bold", size = 13),
+    axis.text.x = element_text(face = "bold", size = 13),
     panel.grid.major.x = element_line(
       colour = "grey90", linewidth = 0.4
     ),
     plot.margin = margin(10, 15, 10, 10)
   )
 
-print(nimaa_nestedness_figure)
+print(nimaa_nestedness_figure+coord_flip())
 
-ggsave(
-  "figures/NIMAA_precursor_nestedness.png",
-  plot = nimaa_nestedness_figure,
-  width = 10,
-  height = 5.5,
-  dpi = 300,
-  bg = "white"
-)
 ```
 Spectronaut had the largest complete submatrix (6.25 million cells; 41.35% of its original matrix), including all 83 runs. DIA-NN included the greatest proportion of original precursors (45.66%) but only 42 runs. AlphaDIA included 81 runs and 20.14% of original matrix cells; MaxDIA included 58 runs and 12.45%.
 
@@ -4075,7 +3900,6 @@ ggplot2::ggplot(
     strip.text = ggplot2::element_text(face = "bold")
   )
 ```
-
 ```{r qc_completeness_summary, message=FALSE}
 # ============================================================
 # Summarize precursor completeness for all four tools
@@ -4479,7 +4303,7 @@ p_mds_condition <- ggplot2::ggplot(
 ) +
   ggplot2::geom_point(
     size = 2.5,
-    alpha = 0.35
+    alpha = 0.85
   ) +
   ggplot2::facet_wrap(
     ~ Software,
@@ -4515,7 +4339,7 @@ p_mds_batch <- ggplot2::ggplot(
 ) +
   ggplot2::geom_point(
     size = 2.5,
-    alpha = 0.35
+    alpha = 0.85
   ) +
   ggplot2::facet_wrap(
     ~ Software,
@@ -4838,6 +4662,7 @@ ggplot2::ggplot(
   )
 ```
 The correlation matrices reveal high overall protein-level similarity between samples, but clear software-dependent differences and batch-associated variation. DIA-NN exhibits the strongest correlations (median 0.976), with only a small difference between within-batch (0.986) and between-batch (0.974) correlations, indicating highly consistent protein abundance rankings across runs. AlphaDIA and Spectronaut show good overall correlations (medians 0.851 and 0.817), but noticeably higher within-batch than between-batch similarity (differences of 0.084 and 0.093, respectively), supporting the batch effects observed in MDS. MaxDIA displays the lowest overall correlation (median 0.731), the lowest minimum correlation (0.521), and greater sample-to-sample variability. Overall, these findings reinforce the importance of accounting for acquisition batch during differential abundance modeling, particularly for AlphaDIA, Spectronaut, and MaxDIA.
+
 
 ## Biological quality control and acquidtion-batch exclusion
 ```{r group4_exclusion_decision}
@@ -5910,6 +5735,7 @@ print(p_correlation)
 - Protein-level sample correlations
 
 Sample-to-sample Spearman correlation analysis revealed substantial differences in quantitative consistency among the four DIA pipelines. DIA-NN exhibited the highest median correlation (0.978), followed by AlphaDIA (0.869), Spectronaut (0.829), and MaxDIA (0.720). Within-batch correlations were consistently higher than between-batch correlations, with median values of 0.922 versus 0.850 for AlphaDIA, 0.985 versus 0.976 for DIA-NN, 0.899 versus 0.814 for Spectronaut, and 0.786 versus 0.715 for MaxDIA. The correlation heatmaps showed corresponding block-like patterns associated with acquisition batch, particularly in AlphaDIA, Spectronaut, and MaxDIA. Together with the MDS results, these observations indicate that batch-associated variation remains an important feature of the retained dataset and should be accounted for in subsequent differential abundance analyses.
+
 
 
 # Data modeling
@@ -9748,7 +9574,7 @@ p_sigma <- ggplot(
       " matched protein groups with valid residual sigma"
     ),
     x = NULL,
-    y = "Residual standard deviation,\n sigma (log10 scale)",
+    y = "Residual standard deviation, sigma (log10 scale)",
     caption = paste(
       "Existing batch-adjusted msqrob2 models.",
       "Identical protein groups compared across all four pipelines."
@@ -11664,7 +11490,7 @@ p_interaction_effects <- interaction_effects |>
     title = "Genotype-interaction effect sizes across DIA pipelines",
     subtitle = "243 proteins with significant joint interactions in all four pipelines",
     x = NULL,
-    y = "KO response minus CTRL response\n(log2 scale)"
+    y = "KO response minus CTRL response (log2 scale)"
   ) +
   theme_bw(base_size = 12) +
   theme(
@@ -12721,7 +12547,7 @@ p_abundance_precision <- ggplot(
       "shared proteins; abundance deciles defined within each pipeline"
     ),
     x = "Protein abundance decile (low to high)",
-    y = "Median model residual SD\n (log2 scale)",
+    y = "Median model residual SD (log2 scale)",
     color = "DIA pipeline"
   ) +
   theme_bw(base_size = 12)
@@ -13169,9 +12995,10 @@ p_upset_precursors <- p_upset_precursors_68
 p_upset_identification <- p_upset_identification_68
 p_precursor_coverage <- p_precursor_coverage_68
 
-p2c <- get_plot("p_precursor_coverage")
-p2a <- get_plot("p_upset_precursors")
-p2b <- get_plot("p_upset_identification")
+p2a <- get_plot("p_precursor_coverage")
+p2b <- get_plot("p_upset_precursors")
+p2c <- get_plot("p_upset_identification")
+
 
 
 fig2 <- (
@@ -13185,7 +13012,7 @@ fig2 <- (
     plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(fig2, "Figure_2_Identification", 8, 10)
+export_figure(fig2, "Figure_2_Identification", 10, 9)
 print(fig2)
 ```
 **Figure 2. Precursor coverage and identification overlap across four DIA proteomics analysis pipelines.** (A) Distribution of unique peptide sequence–charge combinations per protein group identified by AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Boxplots show the median, interquartile range, and whiskers, with counts displayed on a logarithmic (log10) scale. (B) UpSet plot showing shared and pipeline-specific precursor identifications. Intersection bars indicate the number of unique peptide sequence–charge combinations identified by each pipeline combination, while horizontal bars represent the total number identified by each pipeline. Precursors were harmonized using stripped peptide sequence and charge state; modified forms sharing the same sequence and charge were collapsed into a single identifier. (C) UpSet plot showing shared and pipeline-specific protein-group identifications, using exact protein-group identifier matching. Intersection bars indicate the number of protein groups associated with each pipeline combination, and horizontal bars show the total number identified by each pipeline. Filled dots and connecting lines indicate the pipelines contributing to each intersection. All analyses were based on the same 83-sample dataset.
@@ -13441,69 +13268,6 @@ ggsave(
 
 
 ## Fig 5: Reproducible and precision
-
-
-```{r}
-# Protein intensities after MaxLFQ aggregation
-set.seed(123)
-
-protein_density <- dplyr::bind_rows(
-  lapply(names(qf_list), function(software) {
-
-    x <- as.vector(
-      SummarizedExperiment::assay(
-        qf_list[[software]][["proteins"]]
-      )
-    )
-
-    x <- x[is.finite(x)]
-
-    if (length(x) > 100000)
-      x <- sample(x, 100000)
-
-    data.frame(
-      Software = software,
-      Log2_Intensity = x
-    )
-  })
-)
-
-protein_density$Software <- factor(
-  protein_density$Software,
-  levels = names(qf_list)
-)
-
-p_hist_protein_onePlot <- ggplot2::ggplot(
-  protein_density,
-  ggplot2::aes(
-    x = Log2_Intensity,
-    color = Software,
-    fill = Software
-  )
-) +
-  ggplot2::geom_density(
-    linewidth = 1.1,
-    alpha = 0.22,
-    adjust = 1
-  ) +
-  ggplot2::labs(
-    title = "Protein intensity distributions after MaxLFQ aggregation",
-    subtitle = "Pooled normalized log2 protein intensities across 83 LC-MS runs",
-    x = "Normalized log2 protein intensity",
-    y = "Density",
-    color = NULL,
-    fill = NULL
-  ) +
-  ggplot2::theme_classic(base_size = 12) +
-  ggplot2::theme(
-    plot.title = ggplot2::element_text(face = "bold"),
-    legend.position = "top"
-  )
-
-```
-
-
-
 ```{r export_figure_4_precision, eval=FALSE}
 library(patchwork)
 
@@ -13517,81 +13281,26 @@ correlation_summary_68 <- correlation_summary
 p_sigma_68 <- p_sigma
 p_abundance_precision_68 <- p_abundance_precision
 
+
 p5a <- clean_panel(get_plot("p_mds_condition"))
 p5b <- clean_panel(get_plot("p_mds_batch"))
 p5c <- clean_panel(get_plot("p_sigma"))
-p5d <- clean_panel(get_plot("p_abundance_precision")) +
-  labs(y = "Median model residual SD\n(log2 scale)")
+p5d <- clean_panel(get_plot("p_abundance_precision"))
 
-
-software_colors <- c(
-  AlphaDIA    = "#0072B2",
-  `DIA-NN`    = "#E69F00",
-  Spectronaut = "#009E73",
-  MaxDIA      = "#CC79A7"
-)
-
-# Apply consistent pipeline colors to all three density plots
-apply_software_colors <- function(p) {
-  p +
-    scale_color_manual(values = software_colors) +
-    scale_fill_manual(values = software_colors)
-}
-
-p5e <- apply_software_colors(p5e)
-p5f <- apply_software_colors(p5f)
-p5g <- apply_software_colors(p5g)
-# Precursor intensities: before filtering/normalization
-# Use the same pipeline palette as the existing figures
-p5e <- p_hist_all_onePlot +
-  scale_color_manual(values = software_colors) +
-  scale_fill_manual(values = software_colors) +
-  labs(
-    title = "Precursor intensities before\nfiltering and normalization",
-    subtitle = NULL
-  )
-
-p5f <- p_hist_norm_onePlot +
-  scale_color_manual(values = software_colors) +
-  scale_fill_manual(values = software_colors) +
-  labs(
-    title = "Precursor intensities after\n filtering and normalization",
-    subtitle = NULL
-  )
-
-p5g <- p_hist_protein_onePlot +
-  scale_color_manual(values = software_colors) +
-  scale_fill_manual(values = software_colors) +
-  labs(
-    title = "Protein intensities after MaxLFQ aggregation",
-    subtitle = NULL
-  )
-
-# Assemble Figure 5
-fig5 <- (
-  (p5a | p5b) /
-  (p5c | p5d) /
-  (p5e | p5f) /
-  p5g
-) +
-  plot_layout(
-    heights = c(1.1, 0.9, 0.75, 0.75, 0.75)
-  ) +
-  plot_annotation(tag_levels = "A") &
+fig5 <- (p5a | p5b) / (p5c | p5d) +
+  plot_annotation(tag_levels = "A")&
   theme(
-    plot.tag = element_text(size = 28, face = "bold")
+    plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(
-  fig5,
-  "Figure_5_Reproducibility_Precision",
-  12, 14
-)
-
+export_figure(fig5, "Figure_5_Reproducibility_Precision", 14, 10)
 print(fig5)
-
 ```
+
 **Figure 5. Comparison of sample-level reproducibility, quantitative precision, and intensity distributions across four DIA proteomics analysis pipelines.** (A) Multidimensional scaling (MDS) plots showing the distribution of 68 samples processed with AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, colored by experimental condition. (B) MDS plots of the same samples colored by acquisition batch, illustrating batch-associated clustering patterns across pipelines. (C) Distribution of protein-level residual standard deviations (σ) across pipelines, displayed on a logarithmic (log10) scale. Violin plots represent the distribution of residual variability, with embedded boxplots showing the median and interquartile range. Lower residual standard deviations indicate greater quantitative precision. (D) Median protein-level residual standard deviation across ten protein abundance deciles, calculated from log2-transformed protein abundances. Deciles are ordered from lowest (1) to highest (10) protein abundance. Lower values indicate greater quantitative precision. (E) Pooled precursor-level log2 intensity distributions before filtering and normalization, showing software-dependent differences in intensity distributions. Spectronaut exhibits a pronounced low-intensity population and a sharp peak at log2 intensity = 0, corresponding to intensity values of 1. (F) Pooled precursor-level log2 intensity distributions after filtering and normalization. The sharp Spectronaut peak near zero is substantially reduced, whereas its broader low-intensity population persists, indicating that the distinct distribution is not explained solely by intensity values of 1. (G) Pooled normalized protein-level log2 intensity distributions following MaxLFQ aggregation, illustrating differences in the locations and shapes of protein abundance distributions across pipelines. Density curves in panels E–G represent the relative frequency of observed intensities within each pipeline. Together, these analyses characterize sample clustering, batch-associated variation, abundance-dependent quantitative precision, and software-specific intensity distribution patterns across the four DIA analysis pipelines.
+
+**Figure 5. Comparison of sample-level reproducibility and quantitative precision across four DIA proteomics analysis pipelines.** (A) Multidimensional scaling (MDS) plots showing the distribution of 83 samples processed with AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, colored by experimental condition. (B) MDS plots of the same samples colored by acquisition batch, illustrating batch-associated clustering patterns across pipelines. (C) Distribution of protein-level residual standard deviations (σ) across pipelines, displayed on a logarithmic (log10) scale. Violin plots represent the distribution of residual variability, with embedded boxplots showing the median and interquartile range. Lower residual standard deviations indicate greater quantitative precision. (D) Median protein-level residual standard deviation across ten protein abundance deciles, calculated from log2-transformed protein abundances. Deciles are ordered from lowest (1) to highest (10) protein abundance. Lower values indicate greater quantitative precision. Together, these analyses characterize sample clustering, batch-associated variation, and abundance-dependent quantitative precision across the four DIA analysis pipelines.
+
 
 ## Fig 6: Differential abundance
 ```{r export_figure_6_da_68, eval=FALSE}
@@ -13718,6 +13427,17 @@ p8d <- p8d +
     subtitle = NULL,
     y = "Within-group SD of log2 protein\nabundance"
   )
+
+```{r export_figure_7_temporal, eval=FALSE}
+p8a <- p_interaction_agreement
+p8b <- p_interaction_time_patterns
+p8c <- get_plot("p_interaction_effects")
+
+p8a <- p8a + labs(
+  title = "Cross-pipeline interaction agreement",
+  subtitle = NULL,
+  x = "Pipelines detecting significant interaction"
+)
 
 # Assemble Figure 8
 fig8_68 <- (
