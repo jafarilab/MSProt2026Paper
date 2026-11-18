@@ -44,6 +44,7 @@ packages <- c(
   "dplyr",
   "tidyr",
   "ggplot2",
+  "ggh4x",
   "msqrob2",
   "stringr",
   "ExploreModelMatrix",
@@ -777,7 +778,7 @@ inspect_scores <- function(dt, software, plot_scores = TRUE) {
 # Output 
 # Open multipage PDF device
 grDevices::pdf(
-  file = "SuppFigs/Identification_Score_QC_All_Software.pdf",
+  file = "Outputs/Identification_Score_QC_All_Software.pdf",
   width = 11,
   height = 7,
   onefile = TRUE
@@ -806,7 +807,7 @@ tryCatch({
 })
 
 message("All identification score QC plots saved to: ",
-        normalizePath("SuppFigs/Identification_Score_QC_All_Software.pdf"))
+        normalizePath("Outputs/Identification_Score_QC_All_Software.pdf"))
 ```
 
 ## 4. Combine qf assays
@@ -1474,7 +1475,7 @@ p <- ggplot2::ggplot(
     )
   )
 
-ggsave("SuppFigs/Precursor_retention_after_filtering.pdf",
+ggsave("Outputs/Precursor_retention_after_filtering.pdf",
   plot = p,
   width = 5,
   height = 5.5,
@@ -2105,7 +2106,7 @@ p_density <- ggplot2::ggplot(
 
 print(p_density)
 
-ggsave("SuppFigs/Precursor_intensity_distributions_BeforeAfter_normalization.pdf",
+ggsave("Outputs/Precursor_intensity_distributions_BeforeAfter_normalization.pdf",
   plot = p_density,
   width = 7,
   height = 5.5,
@@ -2477,7 +2478,7 @@ nimma_precursore <- nimaa_incidence_check%>%
   mutate(Complete_cells_pct=Complete_cells/(Precursors*Runs)*100)
 
 print(nimma_precursore)
-write.csv(nimma_precursore, 'SuppFigs/nimma_precursore.csv', row.names = F)
+write.csv(nimma_precursore, 'Outputs/nimma_precursore.csv', row.names = F)
 ```
 
 ### - Vis Max Rectangles
@@ -2491,7 +2492,6 @@ software_colors <- c(
   "MaxDIA"      = "#CC79A7"
 )
 
-software_order <- names(software_colors)
 
 # ============================================================
 # PRECURSOR-ONLY MEMORY-EFFICIENT RASTER
@@ -2647,7 +2647,7 @@ nimaa_precursor_figure <- patchwork::wrap_plots(
 
 nimaa_precursor_figure
 
-ggsave("Figs/nimaa_precursor_figure (Fig3Bottom).pdf",
+ggsave("Outputs/nimaa_precursor_figure (Fig3Bottom).pdf",
   plot = nimaa_precursor_figure,
   width = 13.31,
   height = 6.5,
@@ -2662,6 +2662,8 @@ ggsave("Figs/nimaa_precursor_figure (Fig3Bottom).pdf",
 # ============================================================
 # Reconstruct NIMAA lollipop plotting data
 # ============================================================
+software_order <- names(software_colors)
+
 nimaa_lollipop_data <- nimma_precursore |>
   dplyr::transmute(
     Software = as.character(Software),
@@ -2786,7 +2788,7 @@ nimaa_precursor_summary_figure <- ggplot2::ggplot(
     ) +
     
     ggplot2::labs(
-        x = "Original precursor matrix represented (%)",
+        x = "Original precursor represented (%)",
         y = NULL
     ) +
     
@@ -2817,7 +2819,7 @@ nimaa_precursor_summary_figure <- ggplot2::ggplot(
 
 print(nimaa_precursor_summary_figure)
 
-ggsave("Figs/NIMAA_precursor_summary_lollipop (Fig4A).pdf",
+ggsave("Outputs/NIMAA_precursor_summary_lollipop (Fig4A).pdf",
   plot = nimaa_precursor_summary_figure,
   width = 5,
   height = 3.5,
@@ -2945,7 +2947,7 @@ nimaa_nestedness_figure <- ggplot() +
   labs(
 #    title = "Precursor-level nestedness across DIA pipelines",
 #    subtitle = "20 random samples of 5,000 precursors per pipeline",
-    x = "Nestedness temperature (lower = more nested)",
+    x = "Precursor nestedness temperature",
     y = NULL
   ) +
   theme_classic(base_size = 14) +
@@ -2962,7 +2964,7 @@ nimaa_nestedness_figure <- ggplot() +
 
 print(nimaa_nestedness_figure)
 
-ggsave("Figs/nimaa_nestedness_figure (Fig4C).pdf",
+ggsave("Outputs/nimaa_nestedness_figure (Fig4C).pdf",
   plot = nimaa_nestedness_figure,
   width = 5,
   height = 3.5,
@@ -3169,6 +3171,7 @@ The data processing is complete.
 Data exploration aims to highlight the main sources of variation in the data prior to data modelling and can pinpoint to outlying or off-behaving samples.
 
 ## 17. nimaaProt
+### - Checking incidence
 
 ```{r nimaa-protein-incidence}
 # Recover fully processed QFeatures from saved RDS files
@@ -3225,6 +3228,7 @@ nimaa_protein_check <- bind_rows(
 print(as.data.frame(nimaa_protein_check), row.names = FALSE)
 ```
 
+### - Full arranging
 
 ```{r nimaa-protein-rectangles, eval=run_analysis}
 # Apply the same NIMAA arrangement and element-max rectangle method
@@ -3234,12 +3238,14 @@ nimaa_protein_arranged <- lapply(nimaa_protein_incidence,arrange_nimaa_matrix)
 
 nimaa_protein_rectangles <- dplyr::bind_rows(
   lapply(names(nimaa_protein_arranged), function(software) {
-    rect <- find_nimaa_rectangle(nimaa_protein_arranged[[software]])
+    x <- nimaa_protein_arranged[[software]]
+    rect <- find_nimaa_rectangle(x)
     data.frame(
       Software = software,
       Proteins = rect$rows,
       Runs = rect$cols,
-      Complete_cells = rect$cells,Matrix_pct = round(
+      Complete_cells = rect$cells,
+      Matrix_pct = round(
         100 * rect$cells / length(x), 2
       ),
       Protein_pct = round(
@@ -3251,20 +3257,25 @@ nimaa_protein_rectangles <- dplyr::bind_rows(
 
 
 nimma_proteins <- nimaa_protein_check%>%
-  dplyr::select(-Complete_runs, -Complete_precursors)%>%
+  dplyr::select(-Complete_runs, -Complete_proteins)%>%
   left_join(nimaa_protein_rectangles%>%
-              dplyr::select(Software, Complete_Runs=Runs, Complete_Precursors=Precursors, Complete_cells),
+              dplyr::select(Software, Complete_Runs=Runs, Complete_Proteins=Proteins, Complete_cells),
             by = 'Software')%>%
-  mutate(Complete_cells_pct=Complete_cells/(Precursors*Runs)*100)
+  mutate(Complete_cells_pct=Complete_cells/(Proteins*Runs)*100)
 
 print(nimma_proteins)
-write.csv(nimma_proteins, 'SuppFigs/nimma_proteins.csv', row.names = F)
+write.csv(nimma_proteins, 'Outputs/nimma_proteins.csv', row.names = F)
 ```
 
+### - Vis Max Rectangles
+
 ```{r nimaa-protein-figure, eval=FALSE, fig.width=14, fig.height=9, dpi=300, message=FALSE}
-library(ggplot2)
-library(patchwork)
-library(dplyr)
+software_colors <- c(
+  "AlphaDIA"    = "#0072B2",
+  "DIA-NN"      = "#E69F00",
+  "Spectronaut" = "#009E73",
+  "MaxDIA"      = "#CC79A7"
+)
 
 # ============================================================
 # PROTEIN-ONLY RASTER
@@ -3274,11 +3285,7 @@ library(dplyr)
 make_protein_raster <- function(x, color) {
 
   # Convert the full protein incidence matrix to a raster
-  incidence <- t(x)[
-    ncol(x):1,
-    ,
-    drop = FALSE
-  ]
+  incidence <- t(x)[ncol(x):1, , drop = FALSE]
 
   as.raster(matrix(
     c("#FFFFFF", color)[as.integer(incidence) + 1L],
@@ -3395,31 +3402,63 @@ nimaa_protein_figure <- patchwork::wrap_plots(
 )
 
 nimaa_protein_figure
+
+ggsave("Outputs/nimaa_protein_figure (Fig3Top).pdf",
+  plot = nimaa_protein_figure,
+  width = 13.31,
+  height = 6.5,
+  dpi = 300,
+  bg = "white"
+)
+
 ```
 
-```{r nimaa-protein-summary-lollipop, eval= FALSE, fig.width=11, fig.height=5.5, dpi=300}
-library(dplyr)
-library(ggplot2)
-library(scales)
+### - Vis lollipop
 
-protein_plot_data <- nimaa_protein_rectangles |>
-  mutate(
-    Software = factor(
-      Software,
-      levels = rev(c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"))
-    ),
-    Label = sprintf(
-      "%.1f%%\n%s proteins  |  %d/83 runs",
-      Protein_pct,
-      scales::comma(Proteins),
-      Runs
+```{r nimaa-protein-summary-lollipop, eval= FALSE, fig.width=11, fig.height=5.5, dpi=300}
+nimaa_lollipop_data <- nimma_proteins |>
+    dplyr::transmute(
+        Software = as.character(Software),
+        # Percentage of original matrix retained
+        Matrix_pct = Complete_cells_pct,
+        # Percentage of original precursors retained
+          Protein_pct = 100 * Complete_Proteins / Proteins,
+        # Original number of runs
+        Total_Runs = Runs,
+        # Complete rectangle dimensions
+        Proteins = Complete_Proteins,
+        Runs = Complete_Runs
     )
-  )
+
+print(nimaa_lollipop_data)
+
+software_order <- rev(c(
+    "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
+))
+
+protein_plot_data <- nimaa_lollipop_data |>
+    dplyr::mutate(
+        Software = factor(Software, levels = software_order),
+        y_pos = as.numeric(Software),
+        
+        # Label above each point
+        Label_top = sprintf("%.1f%% matrix", Matrix_pct),
+        
+        # Label below the horizontal line
+        Label_bottom = sprintf(
+            "%s proteins (%.1f%%) | %d/%d runs",
+            scales::comma(Proteins),
+            Protein_pct,
+            Runs,
+            Total_Runs
+        )
+    )
+
 
 nimaa_protein_summary_figure <- ggplot(
   protein_plot_data,
   aes(
-    x = Protein_pct,
+    x = Matrix_pct,
     y = Software,
     colour = Software
   )
@@ -3427,63 +3466,76 @@ nimaa_protein_summary_figure <- ggplot(
   geom_segment(
     aes(
       x = 0,
-      xend = Protein_pct,
-      yend = Software
+      xend = Matrix_pct,
+      yend = y_pos
     ),
-    linewidth = 1.5,
+    linewidth = 1.1,
     alpha = 0.8
   ) +
-  geom_point(size = 5.5) +
+  geom_point(size = 3.5) +
   geom_text(
-    aes(label = Label),
-    hjust = -0.08,
-    size = 4.2,
+    aes(x = 50,
+        y = y_pos + 0.15,
+        label = Label_top),
+    hjust = 0.5,
+    size = 3.5,
     colour = "black"
   ) +
+  geom_text(
+    aes(
+      x = 50 ,
+      y = y_pos - 0.15,
+      label = Label_bottom),
+    inherit.aes = FALSE,
+    hjust = 0.5,
+    size = 3.1,
+    colour = "black"
+    ) +
   scale_colour_manual(values = software_colors) +
   scale_x_continuous(
-    limits = c(0, 145),
-    breaks = seq(0, 100, 20),
+    limits = c(0, 105),
+    breaks = seq(0, 105, 50),
     labels = function(x) paste0(x, "%"),
     expand = c(0, 0)
   ) +
   labs(
-    title = "Protein-level NIMAA: Complete submatrix comparison",
-    subtitle = "Complete proteins and runs represented by the element-max submatrix",
+#    title = "Protein-level NIMAA: Complete submatrix comparison",
+#    subtitle = "Complete proteins and runs represented by the element-max submatrix",
     x = "Original proteins represented (%)",
     y = NULL
   ) +
   theme_classic(base_size = 14) +
   theme(
     legend.position = "none",
-    plot.title = element_text(
-      face = "bold",
-      size = 17
-    ),
-    plot.subtitle = element_text(size = 12),
     axis.text.y = element_text(
       face = "bold",
-      size = 13
+      size = 11
     ),
-    axis.text.x = element_text(size = 12),
+    axis.text.x = element_text(size = 10),
+    axis.title.x = element_text(
+            face = "bold",
+            size = 11
+        ),
     panel.grid.major.x = element_line(
       colour = "grey90",
-      linewidth = 0.4
+      linewidth = 0.35
     ),
-    plot.margin = margin(12, 20, 12, 12)
+    plot.margin = margin(8, 12, 8, 8)
   )
 
 print(nimaa_protein_summary_figure)
 
 ggsave(
-  "figures/NIMAA_protein_summary_lollipop.png",
+  "Outputs/NIMAA_protein_summary_lollipop (Fig4B).pdf",
   plot = nimaa_protein_summary_figure,
-  width = 11,
-  height = 5.5,
+  width = 5,
+  height = 3.5,
   dpi = 300,
   bg = "white"
 )
 ```
+
+### - Nestedness
 
 ```{r nimaa-protein-nestedness, eval=run_analysis}
 # Full protein-level nestedness temperature
@@ -3510,13 +3562,80 @@ nimaa_protein_nestedness <- dplyr::bind_rows(
       Nestedness_temperature = as.numeric(temperature),
       Runtime_seconds = unname(elapsed["elapsed"])
     )
-  })
-)
+  }))%>%
+  mutate(Software = factor(Software, levels = software_order))
 
 print(
   as.data.frame(nimaa_protein_nestedness),
   row.names = FALSE
 )
+
+nimaa_protein_nestedness_figure <- ggplot(
+  nimaa_protein_nestedness,
+  aes(
+    x = Nestedness_temperature,
+    y = Software,
+    colour = Software
+  )
+) +
+  geom_segment(
+    aes(
+      x = 0,
+      xend = Nestedness_temperature,
+      yend = Software
+    ),
+    linewidth = 1.1,
+    alpha = 0.8
+  ) +
+  geom_point(size = 3.5) +
+  geom_text(
+    aes(x = Nestedness_temperature,
+        y = Software,
+        label = round(Nestedness_temperature, 2)),
+    hjust = -0.3,
+    size = 3.5,
+    colour = "black"
+  ) +
+  scale_colour_manual(values = software_colors) +
+  scale_x_continuous(
+    limits = c(0, 2),
+    breaks = seq(0, 2, 0.5),
+    expand = c(0, 0)
+  ) +
+  labs(
+    x = "Protein nestedness temperature",
+    y = NULL
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(
+      face = "bold",
+      size = 11
+    ),
+    axis.text.x = element_text(size = 10),
+    axis.title.x = element_text(
+            face = "bold",
+            size = 11
+        ),
+    panel.grid.major.x = element_line(
+      colour = "grey90",
+      linewidth = 0.35
+    ),
+    plot.margin = margin(8, 12, 8, 8)
+  )
+
+print(nimaa_protein_nestedness_figure)
+
+ggsave(
+  "Outputs/NIMAA_protein_nestedness_figure (Fig4D).pdf",
+  plot = nimaa_protein_nestedness_figure,
+  width = 5,
+  height = 3.5,
+  dpi = 300,
+  bg = "white"
+)
+
 ```
 Protein-level NIMAA analysis showed substantially higher completeness than precursor-level analysis across all four DIA pipelines. **AlphaDIA** produced the largest complete submatrix (8,937 proteins × 82 runs; 77.92% matrix coverage), whereas **Spectronaut** achieved the highest proportional coverage (95.12%), followed by MaxDIA (88.60%), DIA-NN (76.85%), and AlphaDIA (77.92%).
 
@@ -3524,246 +3643,29 @@ Nestedness temperatures calculated using **all proteins and 83 runs** were lowes
 
 Overall, protein aggregation substantially reduced missingness, allowing nearly all runs to be preserved in complete submatrices. Spectronaut and MaxDIA exhibited the most complete and strongly nested protein-level detection patterns, while AlphaDIA provided the largest absolute number of complete protein measurements. These findings reflect detection completeness rather than quantitative accuracy.
 
-
-## Normalized precursor intensity density plots
-```{r prepare_marginal_qc, message=FALSE}
-# ============================================================
-# Marginal distribution QC: precursor and protein levels
-# ============================================================
-
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  `DIA-NN` = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
-)
-
-set.seed(123)
-
-qc_precursor_list <- list()
-qc_protein_list <- list()
-qc_sample_size <- 2000L
-
-for (software in names(qf_object_names)) {
-
-  message("Preparing QC data: ", software)
-
-  qf_one <- get(qf_object_names[[software]])
-
-  for (level in c("precursors_norm", "proteins")) {
-
-    se <- qf_one[[level]]
-    x <- assay(se)
-
-    runs <- colnames(se)
-    conditions <- as.character(colData(se)$condition)
-
-    stopifnot(
-      length(runs) == 83L,
-      length(conditions) == length(runs)
-    )
-
-    sampled <- lapply(seq_along(runs), function(j) {
-
-      values <- x[, j]
-      values <- values[is.finite(values)]
-
-      if (length(values) > qc_sample_size) {
-        values <- sample(values, qc_sample_size)
-      }
-
-      data.frame(
-        Software = software,
-        Run = runs[j],
-        Condition = conditions[j],
-        Intensity = values
-      )
-    })
-
-    if (level == "precursors_norm") {
-      qc_precursor_list[[software]] <- dplyr::bind_rows(sampled)
-    } else {
-      qc_protein_list[[software]] <- dplyr::bind_rows(sampled)
-    }
-
-    rm(se, x, sampled)
-  }
-
-  rm(qf_one)
-  gc(verbose = FALSE)
-}
-
-qc_precursor <- dplyr::bind_rows(qc_precursor_list)
-qc_protein <- dplyr::bind_rows(qc_protein_list)
-
-software_order <- names(qf_object_names)
-
-qc_precursor$Software <- factor(
-  qc_precursor$Software,
-  levels = software_order
-)
-
-qc_protein$Software <- factor(
-  qc_protein$Software,
-  levels = software_order
-)
-
-# Consistent condition colors across plots
-all_conditions <- sort(unique(c(
-  qc_precursor$Condition,
-  qc_protein$Condition
-)))
-
-condition_colors <- setNames(
-  grDevices::hcl.colors(
-    length(all_conditions),
-    palette = "Dark 3"
-  ),
-  all_conditions
-)
-
-rm(qc_precursor_list, qc_protein_list)
-gc(verbose = FALSE)
-```
-This reproduces the first tutorial plot for all four tools. Each curve represents one LC-MS run, colored by its experimental condition.
-```{r qc_precursor_density, fig.width=14, fig.height=9, warning=FALSE}
-ggplot2::ggplot(
-  qc_precursor,
-  ggplot2::aes(
-    x = Intensity,
-    colour = Condition,
-    group = Run
-  )
-) +
-  ggplot2::geom_density(
-    linewidth = 0.4,
-    alpha = 0.65
-  ) +
-  ggplot2::facet_wrap(
-    ~ Software,
-    scales = "free",
-    ncol = 2
-  ) +
-  ggplot2::scale_colour_manual(
-    values = condition_colors
-  ) +
-  ggplot2::labs(
-    title = "Normalized precursor intensity distributions",
-    subtitle = "83 LC-MS runs per software; sampled intensities",
-    x = "Normalized log2 precursor intensity",
-    y = "Density",
-    colour = "Condition"
-  ) +
-  ggplot2::theme_classic(base_size = 12) +
-  ggplot2::theme(
-    plot.title = ggplot2::element_text(face = "bold"),
-    strip.text = ggplot2::element_text(face = "bold")
-  )
-```
-```{r qc_precursor_boxplots, fig.width=17, fig.height=10, warning=FALSE}
-ggplot2::ggplot(
-  qc_precursor,
-  ggplot2::aes(
-    x = Run,
-    y = Intensity,
-    fill = Condition
-  )
-) +
-  ggplot2::geom_boxplot(
-    outlier.shape = NA,
-    linewidth = 0.25,
-    width = 0.75
-  ) +
-  ggplot2::facet_wrap(
-    ~ Software,
-    scales = "free_y",
-    ncol = 2
-  ) +
-  ggplot2::scale_fill_manual(
-    values = condition_colors
-  ) +
-  ggplot2::labs(
-    title = "Run-level normalized precursor intensity distributions",
-    subtitle = "83 runs per software; sampled intensities",
-    x = "LC-MS run",
-    y = "Normalized log2 precursor intensity",
-    fill = "Condition"
-  ) +
-  ggplot2::theme_classic(base_size = 11) +
-  ggplot2::theme(
-    axis.text.x = ggplot2::element_blank(),
-    axis.ticks.x = ggplot2::element_blank(),
-    strip.text = ggplot2::element_text(face = "bold"),
-    plot.title = ggplot2::element_text(face = "bold")
-  )
-```
-
-```{r qc_protein_boxplots, fig.width=17, fig.height=10, warning=FALSE}
-ggplot2::ggplot(
-  qc_protein,
-  ggplot2::aes(
-    x = Run,
-    y = Intensity,
-    fill = Condition
-  )
-) +
-  ggplot2::geom_boxplot(
-    outlier.shape = NA,
-    linewidth = 0.25,
-    width = 0.75
-  ) +
-  ggplot2::facet_wrap(
-    ~ Software,
-    scales = "free_y",
-    ncol = 2
-  ) +
-  ggplot2::scale_fill_manual(
-    values = condition_colors
-  ) +
-  ggplot2::labs(
-    title = "Run-level protein intensity distributions after MaxLFQ",
-    subtitle = "83 LC-MS runs per software",
-    x = "LC-MS run",
-    y = "Normalized log2 protein intensity",
-    fill = "Condition"
-  ) +
-  ggplot2::theme_classic(base_size = 11) +
-  ggplot2::theme(
-    axis.text.x = ggplot2::element_blank(),
-    axis.ticks.x = ggplot2::element_blank(),
-    strip.text = ggplot2::element_text(face = "bold"),
-    plot.title = ggplot2::element_text(face = "bold")
-  )
-```
-Overall, the QC results look good and support proceeding to further data exploration.
-- Precursor density plots: AlphaDIA and DIA-NN show good overlap across the 83 runs. MaxDIA has slightly greater variation in distribution shape, while Spectronaut retains a low-intensity secondary peak, consistent with its previously observed reporting behavior.
-- Precursor boxplots: Run-level medians and intensity ranges are generally consistent within each software, with no obvious extreme outliers. There is no clear condition-specific separation in the marginal distributions.
-- Protein boxplots: MaxLFQ aggregation produces well-aligned protein intensity distributions across runs. AlphaDIA and Spectronaut show particularly tight median alignment, while DIA-NN and MaxDIA exhibit modest variability.
-
-Normalization and protein aggregation appear successful, with no major remaining run-level distribution anomalies. However, Spectronaut's low-intensity behavior warrants continued attention.
-
-## Charge state
+## 18. QC
+### - Charge state
 ```{r qc_charge_state, fig.width=16, fig.height=10, message=FALSE, warning=FALSE}
 # ============================================================
 # Charge-state composition of quantified precursors
 # Four DIA software packages, 83 runs each
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  `DIA-NN` = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
 )
 
 charge_qc_list <- list()
 charge_annotation_summary <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
   message("Processing charge states: ", software)
 
-  se <- get(qf_object_names[[software]])[["precursors_norm"]]
+  se <- readRDS(filtered_qf_files[[software]])[["precursors_norm"]]
   x <- assay(se)
 
   # ----------------------------------------------------------
@@ -3883,7 +3785,7 @@ charge_qc$Charge <- factor(
 
 charge_qc$Software <- factor(
   charge_qc$Software,
-  levels = names(qf_object_names)
+  levels = software_names
 )
 
 # ============================================================
@@ -3931,18 +3833,25 @@ ggplot2::ggplot(
 
 print(table(charge_qc$Software))
 ```
-
+### - Completeness
 
 ```{r qc_precursor_completeness, fig.width=16, fig.height=10, message=FALSE, warning=FALSE}
 # ============================================================
 # Precursor data completeness across 83 LC-MS runs
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
 
 completeness_list <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
-  se <- get(qf_object_names[[software]])[["precursors_norm"]]
+  se <- readRDS(filtered_qf_files[[software]])[["precursors_norm"]]
   x <- assay(se)
 
   completeness_list[[software]] <- data.frame(
@@ -3963,7 +3872,7 @@ dat_completeness <- dplyr::bind_rows(
 
 dat_completeness$Software <- factor(
   dat_completeness$Software,
-  levels = names(qf_object_names)
+  levels = software_names
 )
 
 ggplot2::ggplot(
@@ -3998,16 +3907,26 @@ ggplot2::ggplot(
     strip.text = ggplot2::element_text(face = "bold")
   )
 ```
+
+
+
 ```{r qc_completeness_summary, message=FALSE}
 # ============================================================
 # Summarize precursor completeness for all four tools
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
 
 completeness_summary <- lapply(
-  names(qf_object_names),
+  software_names,
   function(software) {
 
-    se <- get(qf_object_names[[software]])[["precursors_norm"]]
+    se <- readRDS(filtered_qf_files[[software]])[["precursors_norm"]]
     x <- assay(se)
 
     observed_per_precursor <- rowSums(is.finite(x))
@@ -4038,24 +3957,25 @@ print(completeness_summary)
 ```
 The charge-state distributions are generally stable across the 83 LC-MS runs in all four software pipelines, with predominantly doubly and triply charged precursors and no obvious major charge-state bias. However, precursor completeness differs substantially between pipelines. Spectronaut shows the highest median run-level completeness (94.2%) and proportion of precursors quantified across all 83 runs (41.4%), although this should be interpreted cautiously given its previously observed intensity-floor behavior. AlphaDIA and DIA-NN show comparable median completeness (72.5% and 75.7%) and complete precursor proportions (19.5% and 22.0%), whereas MaxDIA exhibits greater variability, including the lowest minimum run completeness (34.3%) and lowest proportion of complete precursors (9.7%). Overall, charge-state composition appears consistent, but differences in precursor missingness—particularly in MaxDIA—should be considered during downstream statistical modeling.
 
-## Identifications per sample
+### - Identifications per sample
+
 ```{r qc_identifications_per_run, fig.width=17, fig.height=10, message=FALSE, warning=FALSE}
 # ============================================================
 # Quantified precursors and protein groups per LC-MS run
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  `DIA-NN` = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
 )
 
 identification_list <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
-  se <- get(qf_object_names[[software]])[["precursors_norm"]]
+  se <- readRDS(filtered_qf_files[[software]])[["precursors_norm"]]
   x <- assay(se)
 
   protein_groups <- as.character(rowData(se)$Protein.Group)
@@ -4110,7 +4030,7 @@ identification_long <- identification_qc |>
 
 identification_long$Software <- factor(
   identification_long$Software,
-  levels = names(qf_object_names)
+  levels = software_names
 )
 
 ggplot2::ggplot(
@@ -4122,9 +4042,10 @@ ggplot2::ggplot(
   )
 ) +
   ggplot2::geom_col(width = 0.85) +
-  ggplot2::facet_grid(
+  facet_grid2(
     Software ~ Feature,
-    scales = "free_y"
+    scales = "free_y",
+    independent = "y" 
   ) +
   ggplot2::labs(
     title = "Quantified precursor and protein group identifications per run",
@@ -4142,16 +4063,26 @@ ggplot2::ggplot(
 ```
 The number of quantified precursors varies across runs and software pipelines, with AlphaDIA and DIA-NN showing relatively similar coverage patterns, Spectronaut exhibiting more consistent precursor counts, and MaxDIA displaying greater run-to-run variability. Protein group counts appear comparatively stable within each pipeline. These results suggest differences in precursor detection efficiency and coverage between software tools, without indicating a clear condition-specific identification bias.
 
+
+### - Detection frequency
+
 ```{r qc_precursor_detection_frequency, fig.width=14, fig.height=9, message=FALSE, warning=FALSE}
 # ============================================================
 # Precursor detection frequency across 83 LC-MS runs
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
 
 detection_list <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
-  se <- get(qf_object_names[[software]])[["precursors_norm"]]
+  se <- readRDS(filtered_qf_files[[software]])[["precursors_norm"]]
   x <- assay(se)
 
   detection_list[[software]] <- data.frame(
@@ -4167,7 +4098,7 @@ detection_qc <- dplyr::bind_rows(detection_list)
 
 detection_qc$Software <- factor(
   detection_qc$Software,
-  levels = names(qf_object_names)
+  levels = software_names
 )
 
 ggplot2::ggplot(
@@ -4201,17 +4132,25 @@ ggplot2::ggplot(
   )
 ```
 Precursor detection frequency differs substantially between software packages. Spectronaut shows a strong concentration of precursors quantified in nearly all 83 runs, indicating high data completeness. AlphaDIA and DIA-NN exhibit broader detection-frequency distributions, while MaxDIA shows the greatest proportion of precursors quantified in intermediate numbers of runs. These findings highlight software-dependent missingness patterns, with Spectronaut providing the most complete precursor matrix, although its previously observed intensity-floor behavior warrants caution.
+### - Completeness condition
 
 ```{r qc_completeness_by_condition, fig.width=15, fig.height=9, message=FALSE, warning=FALSE}
 # ============================================================
 # Precursor completeness within experimental conditions
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
 
 condition_completeness_list <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
-  se <- get(qf_object_names[[software]])[["precursors_norm"]]
+  se <- readRDS(filtered_qf_files[[software]])[["precursors_norm"]]
   x <- assay(se)
 
   conditions <- as.character(colData(se)$condition)
@@ -4299,29 +4238,31 @@ print(condition_completeness)
 ```
 Spectronaut consistently demonstrates the highest within-condition completeness, with approximately 59–79% of precursors quantified in every replicate and 95–97% meeting the two-thirds detection threshold. AlphaDIA and DIA-NN show intermediate completeness, with 28–42% and 32–50% of precursors, respectively, quantified in all runs within a condition. MaxDIA exhibits the lowest and most variable completeness (16–42%), particularly in untreated baseline and 24-hour treatment groups. Across all pipelines, conditions containing more replicates generally show lower complete-case percentages, reflecting the greater difficulty of detecting a precursor in every run. Overall, these results emphasize the importance of accounting for software-specific missingness during downstream statistical modeling.
 
-## Dimensionality reduction plot
+### - Dimensionality reduction
 
 ```{r protein_mds_qc, fig.width=15, fig.height=11, message=FALSE, warning=FALSE}
 # ============================================================
 # Protein-level MDS: four DIA software packages
 # Complete-case proteins, 83 LC-MS runs
 # ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  `DIA-NN` = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
 )
+
+
 
 mds_list <- list()
 mds_summary <- list()
 
-for (software in names(qf_object_names)) {
+for (software in software_names) {
 
   message("Running protein-level MDS: ", software)
 
-  qf_one <- get(qf_object_names[[software]])
+  qf_one <- readRDS(filtered_qf_files[[software]])
 
   # Retrieve protein assay with sample metadata
   se <- qf_one[["proteins"]]
@@ -4384,7 +4325,7 @@ print(mds_summary)
 
 mds_qc$Software <- factor(
   mds_qc$Software,
-  levels = names(qf_object_names)
+  levels = software_names
 )
 
 # ============================================================
@@ -4468,11 +4409,15 @@ The batch-colored plots show pronounced clustering according to acquisition batc
 These are substantial numbers of proteins for exploratory MDS, although each software uses a different set of complete-case proteins.
 
 The results suggest that acquisition batch is a major source of protein-level variation, potentially masking biological differences between experimental conditions. This is consistent across all four analysis pipelines and therefore deserves attention before differential abundance analysis.
+### - Condition across batches
 
 ```{r qc_condition_batch_balance, fig.width=12, fig.height=7, message=FALSE, warning=FALSE}
 # ============================================================
 # Experimental condition distribution across acquisition batches
 # ============================================================
+
+qf_alpha <- readRDS(filtered_qf_files[["AlphaDIA"]])
+
 
 qf_object_names <- c(
   AlphaDIA = "qf_alpha",
@@ -4584,7 +4529,7 @@ The key findings are:
 - Every experimental condition appears in at least two batches, but the design is not fully crossed.
 Most importantly, treatment duration (6 h versus 24 h) is confounded with acquisition batch among treated samples. Consequently, a direct comparison of 6-hour and 24-hour treatment effects cannot be reliably separated from batch effects without additional assumptions.
 
-## Correlation matrix
+### - Correlation matrix
 
 ```{r qc_protein_spearman_correlation, fig.width=14, fig.height=12, message=FALSE, warning=FALSE}
 # ============================================================

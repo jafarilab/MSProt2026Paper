@@ -1,0 +1,5 @@
+"Software","Proteins","Runs","Observed_pct","Missing_pct","Complete_Runs","Complete_Proteins","Complete_cells","Complete_cells_pct"
+"AlphaDIA",11331,83,96.44,3.56,82,8937,732834,77.9218542159105
+"DIA-NN",9833,83,95.07,4.93,83,7557,627231,76.8534526594122
+"Spectronaut",7970,83,99.68,0.32,83,7581,629223,95.1191969887077
+"MaxDIA",8482,83,99.36,0.64,83,7515,623745,88.5993869370431
