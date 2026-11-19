@@ -1,0 +1,5 @@
+"Software","Precursors","Runs","Observed_pct","Missing_pct","Complete_Runs","Complete_Precursors","Complete_cells","Complete_cells_pct"
+"AlphaDIA",203001,83,73.48,26.52,81,41896,3393576,20.1410130153671
+"DIA-NN",206949,83,76.01,23.99,42,94504,3969168,23.1077710956899
+"Spectronaut",182078,83,93.74,6.26,83,75295,6249485,41.3531563395907
+"MaxDIA",230163,83,68.81,31.19,58,41019,2379102,12.4537304076121
