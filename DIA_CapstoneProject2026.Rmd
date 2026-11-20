@@ -4329,7 +4329,7 @@ The results suggest that acquisition batch is a major source of protein-level va
 # ============================================================
 # Experimental condition distribution across acquisition batches
 # ============================================================
-rm(list = setdiff(ls(), c("cache_dir", "software_names", "sample_design")))
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
 invisible(gc(verbose = FALSE))
 
 filtered_qf_files <- setNames(
@@ -4339,13 +4339,6 @@ filtered_qf_files <- setNames(
 
 qf_alpha <- readRDS(filtered_qf_files[["AlphaDIA"]])
 
-
-qf_object_names <- c(
-  AlphaDIA = "qf_alpha",
-  `DIA-NN` = "qf_diann",
-  Spectronaut = "qf_spectro",
-  MaxDIA = "qf_maxdia"
-)
 
 # Sample design is shared by all four software packages
 se <- qf_alpha[["proteins"]]
@@ -4624,8 +4617,569 @@ print(correlation_runs)
 ```
 The correlation matrices reveal high overall protein-level similarity between samples, but clear software-dependent differences and batch-associated variation. DIA-NN exhibits the strongest correlations (median 0.976), with only a small difference between within-batch (0.986) and between-batch (0.974) correlations, indicating highly consistent protein abundance rankings across runs. AlphaDIA and Spectronaut show good overall correlations (medians 0.851 and 0.817), but noticeably higher within-batch than between-batch similarity (differences of 0.084 and 0.093, respectively), supporting the batch effects observed in MDS. MaxDIA displays the lowest overall correlation (median 0.731), the lowest minimum correlation (0.521), and greater sample-to-sample variability. Overall, these findings reinforce the importance of accounting for acquisition batch during differential abundance modeling, particularly for AlphaDIA, Spectronaut, and MaxDIA.
 
+## 17. Shared identification
+### - Protein identification UpSet plot
+```{r upset_protein_identification, fig.width=12, fig.height=7.5, dpi=300, message=FALSE, warning=FALSE}
+# ============================================================
+# Publication-quality protein identification UpSet plot
+# ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-## 17.Biological QC and acquidtion-batch exclusion
+# Consistent software colors for all subsequent figures
+software_colors <- c(
+  "AlphaDIA"    = "#0072B2",
+  "DIA-NN"      = "#E69F00",
+  "Spectronaut" = "#009E73",
+  "MaxDIA"      = "#CC79A7"
+)
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
+
+qf_alpha <- readRDS(filtered_qf_files[["AlphaDIA"]])
+qf_diann <- readRDS(filtered_qf_files[["DIANN"]])
+qf_spectro <- readRDS(filtered_qf_files[["Spectronaut"]])
+qf_maxdia <- readRDS(filtered_qf_files[["MaxDIA"]])
+
+# Consistent software colors for all subsequent figures
+software_colors <- c(
+  "AlphaDIA"    = "#0072B2",
+  "DIA-NN"      = "#E69F00",
+  "Spectronaut" = "#009E73",
+  "MaxDIA"      = "#CC79A7"
+)
+
+# Extract protein-group identifiers
+protein_sets <- list(
+  AlphaDIA = unique(rownames(qf_alpha[["proteins"]])),
+  `DIA-NN` = unique(rownames(qf_diann[["proteins"]])),
+  Spectronaut = unique(rownames(qf_spectro[["proteins"]])),
+  MaxDIA = unique(rownames(qf_maxdia[["proteins"]]))
+)
+
+# Check set sizes
+protein_id_counts <- data.frame(
+  Software = names(protein_sets),
+  Identified_Proteins = lengths(protein_sets),
+  row.names = NULL
+)
+
+print(protein_id_counts, row.names = FALSE)
+
+# Build presence/absence data
+all_proteins <- unique(unlist(protein_sets, use.names = FALSE))
+
+protein_presence <- data.frame(
+  Protein = all_proteins,
+  check.names = FALSE
+)
+
+for (software in names(protein_sets)) {
+  protein_presence[[software]] <-
+    all_proteins %in% protein_sets[[software]]
+}
+
+stopifnot(
+  identical(
+    as.integer(colSums(protein_presence[names(protein_sets)])),
+    as.integer(lengths(protein_sets))
+  )
+)
+
+# Plot
+p_upset_identification <- ComplexUpset::upset(
+  protein_presence,
+  intersect = names(protein_sets),
+  name = "groups",
+  sort_intersections_by = "cardinality",
+  min_size = 1,
+  width_ratio = 0.30,
+  # Colored intersection
+  matrix = (ComplexUpset::intersection_matrix(
+    geom = ggplot2::geom_point(shape = 21, size = 5, stroke = 0.35),
+    segment = ggplot2::geom_segment(color = "black", linewidth = 0.6),
+    outline_color = list(active = "black", inactive = "grey80"))),
+  
+  # Color active dots according to their software
+  queries = lapply(names(protein_sets), function(s) {
+    ComplexUpset::upset_query(set = s, fill = unname(software_colors[[s]]),
+                              only_components = "intersections_matrix")}),
+  set_sizes = (ComplexUpset::upset_set_size(geom = ggplot2::geom_bar(
+    fill = unname(software_colors), width = 0.65))+
+      ggplot2::scale_y_reverse(
+        labels = function(x) {ifelse(x == 0, "0", paste0(x / 1000, "k"))})),
+  
+  base_annotations = list(
+    "Shared proteins" =
+      ComplexUpset::intersection_size(
+        mapping = ggplot2::aes(fill = "Intersection"),
+        text = list(
+          size = 3,
+          angle = 90,
+          hjust = -0.1,
+          vjust = 0.5,
+          color = "black"
+        )
+      ) +
+      ggplot2::scale_fill_manual(
+        values = c("Intersection" = "#D8D2C8"),
+        guide = "none"
+      ) +
+      ggplot2::scale_y_continuous(
+        labels = scales::comma,
+        expand = ggplot2::expansion(mult = c(0, 0.18))
+      ) +
+      ggplot2::theme(
+        panel.grid.major.x = ggplot2::element_blank(),
+        panel.grid.minor = ggplot2::element_blank()
+      )
+  ),
+  
+  stripes = ComplexUpset::upset_stripes(
+    colors = c("white", "#F5F7FA")
+  )
+) +
+  ggplot2::labs(
+    title = "Protein identification overlap",
+    # subtitle = "Shared and pipeline-specific protein groups across 83 samples",
+    # caption = "Exact protein-group identifier matching",
+    y = ""
+  ) +
+  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    plot.title = ggplot2::element_text(
+      face = "bold", size = 17
+    ),
+    plot.subtitle = ggplot2::element_text(
+      size = 11, color = "#667085"
+    ),
+    axis.title = ggplot2::element_text(
+      face = "bold", size = 15
+    ),
+    axis.text = ggplot2::element_text(
+      size = 13, color = "#344054"
+    ),
+    panel.grid.minor = ggplot2::element_blank(),
+    plot.background = ggplot2::element_rect(
+      fill = "white", color = NA
+    )
+  )
+
+ggplot2::ggsave(
+  "Outputs/p_upset_identification.pdf",
+  plot = p_upset_identification,
+  width = 9,
+  height = 5,
+  bg = "white"
+)
+saveRDS(p_upset_identification, "Outputs/p_upset_identification.rds")
+
+print(p_upset_identification)
+```
+The UpSet plot shows substantial agreement in protein identification across the four DIA analysis pipelines, with 7,483 protein groups shared by all four tools, representing a large common proteomic core. However, pipeline-specific differences are also evident, particularly for AlphaDIA, which identifies the largest number of protein groups and contributes 2,413 uniquely identified groups. DIA-NN, MaxDIA, and Spectronaut show smaller tool-specific contributions. These findings suggest that while the pipelines consistently identify a substantial shared proteome, their identification coverage differs considerably. Importantly, the overlaps are based on exact protein-group identifiers, so differences in protein grouping between software packages may contribute to the observed discrepancies.
+
+### - Precursor identification UpSet plot
+
+```{r harmonize_precursor_identifiers, message=FALSE, warning=FALSE}
+# ============================================================
+# Harmonize precursor identifiers across DIA pipelines
+# Stripped peptide sequence + precursor charge
+# ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+# Consistent software colors for all subsequent figures
+software_colors <- c(
+  "AlphaDIA"    = "#0072B2",
+  "DIA-NN"      = "#E69F00",
+  "Spectronaut" = "#009E73",
+  "MaxDIA"      = "#CC79A7"
+)
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
+
+qf_alpha <- readRDS(filtered_qf_files[["AlphaDIA"]])
+qf_diann <- readRDS(filtered_qf_files[["DIANN"]])
+qf_spectro <- readRDS(filtered_qf_files[["Spectronaut"]])
+qf_maxdia <- readRDS(filtered_qf_files[["MaxDIA"]])
+
+qf_precursors <- list(
+  AlphaDIA = qf_alpha,
+  `DIA-NN` = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
+)
+
+precursor_sets <- lapply(names(qf_precursors), function(software) {
+
+  rd <- as.data.frame(
+    SummarizedExperiment::rowData(
+      qf_precursors[[software]][["precursors"]]
+    )
+  )
+
+  sequence <- as.character(rd$Stripped.Sequence)
+
+  if (software == "Spectronaut") {
+
+    # Spectronaut precursor IDs end with .charge
+    precursor_id <- as.character(rd$Precursor.Id)
+
+    charge <- ifelse(
+      grepl("\\.[0-9]+$", precursor_id),
+      sub("^.*\\.([0-9]+)$", "\\1", precursor_id),
+      NA_character_
+    )
+
+  } else {
+
+    charge <- as.character(rd$Precursor.Charge)
+
+  }
+
+  # Exclude entries lacking a valid sequence or charge
+  valid <- !is.na(sequence) &
+    nzchar(sequence) &
+    !is.na(charge) &
+    grepl("^[0-9]+$", charge) &
+    as.integer(charge) > 0
+
+  # Collapse modified forms sharing the same sequence and charge
+  unique(
+    paste(sequence[valid], charge[valid], sep = "|")
+  )
+})
+
+names(precursor_sets) <- names(qf_precursors)
+
+# Compare original entries with harmonized identifiers
+precursor_harmonization_summary <- data.frame(
+  Software = names(qf_precursors),
+  Original_Entries = vapply(
+    qf_precursors,
+    function(qf) nrow(qf[["precursors"]]),
+    integer(1)
+  ),
+  Unique_Sequence_Charge = lengths(precursor_sets),
+  row.names = NULL
+)
+
+precursor_harmonization_summary$Collapsed_or_Excluded <-
+  precursor_harmonization_summary$Original_Entries -
+  precursor_harmonization_summary$Unique_Sequence_Charge
+
+print(precursor_harmonization_summary, row.names = FALSE)
+
+# ============================================================
+# Precursor sequence-charge identification UpSet plot
+# ============================================================
+
+# Build presence/absence table
+all_precursors <- unique(
+  unlist(precursor_sets, use.names = FALSE)
+)
+
+precursor_presence <- data.frame(
+  Precursor = all_precursors,
+  check.names = FALSE
+)
+
+for (software in names(precursor_sets)) {
+  precursor_presence[[software]] <-
+    all_precursors %in% precursor_sets[[software]]
+}
+
+# Verify set sizes
+stopifnot(
+  identical(
+    as.integer(colSums(precursor_presence[names(precursor_sets)])),
+    as.integer(lengths(precursor_sets))
+  )
+)
+
+# Reuse the software color palette from the protein plot
+p_upset_precursors <- ComplexUpset::upset(
+  precursor_presence,
+  intersect = names(precursor_sets),
+  name = "groups",
+  sort_intersections_by = "cardinality",
+  min_size = 1,
+  width_ratio = 0.30,
+  # Colored intersection
+  matrix = (ComplexUpset::intersection_matrix(
+    geom = ggplot2::geom_point(shape = 21, size = 5, stroke = 0.35),
+      segment = ggplot2::geom_segment(color = "black", linewidth = 0.6),
+      outline_color = list(active = "black", inactive = "grey80"))),
+  
+  # Color active dots according to their software
+  queries = lapply(names(protein_sets), function(s) {
+    ComplexUpset::upset_query(set = s, fill = unname(software_colors[[s]]),
+                              only_components = "intersections_matrix")}),
+  set_sizes = (ComplexUpset::upset_set_size(geom = ggplot2::geom_bar(
+    fill = unname(software_colors), width = 0.65))+
+      ggplot2::scale_y_reverse(
+        labels = function(x) {ifelse(x == 0, "0", paste0(x / 1000, "k"))})),
+
+  base_annotations = list(
+    "Shared precursors" =
+      ComplexUpset::intersection_size(
+        mapping = ggplot2::aes(fill = "Intersection"),
+        text = list(
+          size = 3,
+          angle = 90,
+          hjust = -0.1,
+          vjust = 0.5,
+          color = "black"
+            )
+        ) +
+        ggplot2::scale_fill_manual(
+          values = c("Intersection" = "#D8D2C8"),
+          guide = "none"
+        ) +
+      ggplot2::scale_y_continuous(
+        labels = scales::comma,
+        expand = ggplot2::expansion(mult = c(0, 0.25))
+      ) +
+      ggplot2::theme(
+        panel.grid.major.x = ggplot2::element_blank(),
+        panel.grid.minor = ggplot2::element_blank()
+      )
+  ),
+
+  stripes = ComplexUpset::upset_stripes(
+    colors = c("white", "#F5F7FA")
+  )
+) +
+  ggplot2::labs(
+    title = "Precursor identification overlap",
+    y = "",
+  ) +
+  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_blank(),
+    axis.ticks.x = ggplot2::element_blank(),
+    plot.title = ggplot2::element_text(
+      face = "bold", size = 17
+    ),
+    plot.subtitle = ggplot2::element_text(
+      size = 11, color = "#667085"
+    ),
+    plot.caption = ggplot2::element_text(
+      size = 9, color = "#667085"
+    ),
+    axis.title = ggplot2::element_text(
+      face = "bold", size = 15
+    ),
+    axis.text = ggplot2::element_text(
+      size = 11, color = "#344054"
+    ),
+    panel.grid.minor = ggplot2::element_blank(),
+    plot.background = ggplot2::element_rect(
+      fill = "white", color = NA
+    )
+  )
+
+ggplot2::ggsave(
+  "Outputs/p_upset_precursors.pdf",
+  plot = p_upset_precursors,
+  width = 9,
+  height = 5,
+  bg = "white"
+)
+saveRDS(p_upset_precursors, "Outputs/p_upset_precursors.rds")
+
+print(p_upset_precursors)
+```
+
+
+Precursor-level identification overlap revealed a substantial shared proteomic core across the four DIA analysis pipelines, with 113,518 peptide sequence–charge combinations identified by all four tools. Nevertheless, considerable pipeline-specific variation was observed, particularly for MaxDIA, which identified the largest number of unique combinations (62,518). Spectronaut exhibited the highest proportion of identifications belonging to the four-way intersection (71.5%), despite having the smallest overall sequence–charge identification set. Compared with the protein-level analysis, these findings indicate greater heterogeneity in precursor identification than in protein-group coverage. This suggests that differences in precursor-level detection and reporting may not translate directly into equivalent differences in protein identification.
+
+### - Precursor per protein
+
+```{r precursor_coverage_per_protein, fig.width=11, fig.height=6, dpi=300, message=FALSE, warning=FALSE}
+# ============================================================
+# Sequence-charge coverage per protein group across DIA tools
+# ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+# Consistent software colors for all subsequent figures
+software_colors <- c(
+  "AlphaDIA"    = "#0072B2",
+  "DIA-NN"      = "#E69F00",
+  "Spectronaut" = "#009E73",
+  "MaxDIA"      = "#CC79A7"
+)
+
+filtered_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
+  software_names
+)
+
+qf_alpha <- readRDS(filtered_qf_files[["AlphaDIA"]])
+qf_diann <- readRDS(filtered_qf_files[["DIANN"]])
+qf_spectro <- readRDS(filtered_qf_files[["Spectronaut"]])
+qf_maxdia <- readRDS(filtered_qf_files[["MaxDIA"]])
+
+qf_coverage <- list(
+  AlphaDIA = qf_alpha,
+  `DIA-NN` = qf_diann,
+  Spectronaut = qf_spectro,
+  MaxDIA = qf_maxdia
+)
+
+# Calculate the number of distinct sequence-charge combinations
+# assigned to each protein-group annotation.
+get_protein_coverage <- function(qf, software) {
+  rd <- as.data.frame(
+    SummarizedExperiment::rowData(qf[["precursors"]])
+  )
+
+  sequence <- as.character(rd$Stripped.Sequence)
+
+  if (software == "Spectronaut") {
+    precursor_id <- as.character(rd$Precursor.Id)
+
+    charge <- ifelse(
+      grepl("\\.[0-9]+$", precursor_id),
+      sub("^.*\\.([0-9]+)$", "\\1", precursor_id),
+      NA_character_
+    )
+  } else {
+    charge <- as.character(rd$Precursor.Charge)
+  }
+
+  protein_group <- trimws(as.character(rd$Protein.Group))
+
+  valid <- !is.na(sequence) & nzchar(sequence) &
+    !is.na(charge) & grepl("^[0-9]+$", charge) &
+    as.integer(charge) > 0 &
+    !is.na(protein_group) & nzchar(protein_group)
+
+  precursor_mapping <- data.frame(
+    Protein.Group = protein_group[valid],
+    Sequence_Charge = paste(
+      sequence[valid], charge[valid], sep = "|"
+    )
+  )
+
+  # Remove duplicate sequence-charge / protein-group mappings
+  precursor_mapping <- unique(precursor_mapping)
+
+  coverage <- precursor_mapping %>%
+    dplyr::count(Protein.Group, name = "Precursor_Count")
+
+  coverage$Software <- software
+
+  coverage
+}
+
+protein_coverage <- dplyr::bind_rows(
+  lapply(names(qf_coverage), function(software) {
+    get_protein_coverage(qf_coverage[[software]], software)
+  })
+)
+
+protein_coverage$Software <- factor(
+  protein_coverage$Software,
+  levels = names(qf_coverage)
+)
+
+# Summary statistics
+protein_coverage_summary <- protein_coverage %>%
+  group_by(Software) %>%
+  summarise(
+    Protein_Groups_With_Precursors = n(),
+    Mean_Precursors = mean(Precursor_Count),
+    Median_Precursors = median(Precursor_Count),
+    Q1 = quantile(Precursor_Count, 0.25),
+    Q3 = quantile(Precursor_Count, 0.75),
+    Max_Precursors = max(Precursor_Count),
+    .groups = "drop"
+  )
+
+print(protein_coverage_summary, n = Inf)
+
+# Visualize coverage distribution
+p_precursor_coverage <- ggplot(
+  protein_coverage,
+  aes(x = Software, y = Precursor_Count, fill = Software)
+) +
+  # Violin: overall distribution
+  geom_violin(
+    width = 0.9,
+    alpha = 0.25,
+    color = NA,
+    trim = FALSE
+  ) +
+  
+  # Boxplot: median + IQR
+  geom_boxplot(
+    outlier.shape = NA,
+    width = 0.22,
+    alpha = 0.8,
+    color = "black"
+  ) +
+  
+  # Mean point
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 23,
+    size = 5,
+    fill = "white",
+    color = "black",
+    stroke = 0.8
+  ) +
+  
+  scale_fill_manual(values = software_colors) +
+  scale_color_manual(values = software_colors) +
+  
+  scale_y_log10(
+    breaks = c(1, 2, 5, 10, 20, 50, 100, 200, 500),
+    labels = scales::comma
+  ) +
+  
+  labs(
+    title = "Precursor coverage per protein group",
+    x = NULL,
+    y = "Precursors per protein"
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15),
+    legend.position = "none",
+    axis.text.x = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+
+
+ggplot2::ggsave(
+  "Outputs/p_precursor_coverage.pdf",
+  plot = p_precursor_coverage,
+  width = 6,
+  height = 5,
+  bg = "white"
+)
+saveRDS(p_precursor_coverage, "Outputs/p_precursor_coverage.rds")
+
+print(p_precursor_coverage)
+
+```
+
+To investigate the discrepancy between MaxDIA's high precursor-level coverage and its comparatively lower protein-group identification count, the number of distinct peptide sequence–charge combinations assigned to each protein group was examined. MaxDIA exhibited the highest mean (27.1) and median (20) sequence–charge combinations per protein group, compared with Spectronaut (19.9 and 13), DIA-NN (19.2 and 12), and AlphaDIA (16.0 and 10), respectively. Furthermore, 99.1% of MaxDIA-specific sequence–charge combinations were associated with protein accessions also identified by at least one other pipeline. Together, these findings indicate that MaxDIA's increased precursor-level identification coverage predominantly reflects greater sequence–charge representation of already identified proteins rather than a proportional expansion of protein-group coverage. Nevertheless, differences in precursor reporting, protein inference, and filtering may also contribute to the observed variation.
+
+## 18. Biological QC and acquidtion-batch exclusion
 ###  - Revise sample_design
 ```{r group4_exclusion_decision}
 # ============================================================
@@ -5364,7 +5918,7 @@ print(p_jun)
 ```
 
 
-## 18. Filtering out Group4 batch
+## 19. Filtering out Group4 batch
 
 ```{r exclude_group4_68runs}
 # ------------------------------------------------------------
@@ -5478,6 +6032,12 @@ if (!design_check_68$Full_rank) {
 # ------------------------------------------------------------
 # 6. Save filtered objects for downstream analyses
 # ------------------------------------------------------------
+saveRDS(
+  list(
+    qf_models = qf_models_83,
+    sample_design = sample_design_83),
+  file = paste0(cache_dir, "/qf_models_83runs.rds")
+)
 
 saveRDS(
   list(
@@ -5561,8 +6121,8 @@ print(data.frame(
 # Protein-level MDS: four DIA software packages
 # Complete-case proteins, 68 retained LC-MS runs
 # ============================================================
-rm(list = setdiff(ls(), c("cache_dir", "software_names",
-                          "qf_models_68", "sample_design_68",
+rm(list = setdiff(ls(), c("cache_dir", "software_names", "proteins_68",
+                          "qf_models_68", "sample_design_68", "qf_models_83", "sample_design_83",
                           "proteins_68", "software_order")))
 invisible(gc(verbose = FALSE))
 
@@ -5994,15 +6554,12 @@ model <- ~ Batch + condition
 # ============================================================
 # Design matrix diagnostics before protein-level modeling
 # ============================================================
-rm(list = setdiff(ls(), c("cache_dir", "software_names", "sample_design")))
+rm(list = setdiff(ls(), c("cache_dir", "software_names", "proteins_68",
+                          "qf_models_68", "sample_design_68", "qf_models_83", "sample_design_83")))
 invisible(gc(verbose = FALSE))
 
-filtered_qf_files <- setNames(
-  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
-  software_names
-)
 
-qf_alpha <- readRDS(filtered_qf_files[["AlphaDIA"]])
+qf_alpha <- qf_models_83[["AlphaDIA"]]
 
 se <- qf_alpha[["proteins"]]
 
@@ -6255,16 +6812,15 @@ The two 24 h versus 6 h comparisons are mathematically estimable but have no sha
 
 Although the overall design supports these contrasts, individual proteins may have missing observations. A protein measured only in certain batches or conditions may not support every contrast, even when the overall design matrix is full rank.
 
-# 68 Data modeling
+## 20. 68 Data modeling
 Following the exclusion of acquisition Group 4, the primary analysis comprised 68 LC-MS runs across eight experimental conditions and four acquisition batches. The 6-hour treatment conditions were represented exclusively in Group 3, whereas the 24-hour treatment conditions were distributed across Groups 1, 2, and 20260331. Untreated CTRL and KO samples were represented across all four retained batches.
 
 Protein-level differential abundance was modeled using experimental condition and acquisition batch as additive fixed effects. This approach accounts for systematic batch-associated differences while estimating condition-specific abundance changes. Comparisons between conditions represented within the same acquisition batches have direct within-batch support. In contrast, comparisons between 6-hour and 24-hour treatment conditions lack direct within-batch replication and therefore depend more strongly on the assumption of additive batch effects.
-## 68 Construct and evaluate the design matrix
+### - 68 Construct and evaluate the design matrix
 ```{r qc_design_matrix_68, message=FALSE, warning=FALSE}
 # ============================================================
 # Design matrix diagnostics: 68-run analysis
 # ============================================================
-
 # Preserve the original formula
 model_68 <- ~ Batch + condition
 
@@ -6305,12 +6861,9 @@ stopifnot(
   nrow(design_data_68) == 68L,
   !anyNA(design_data_68$condition),
   !anyNA(design_data_68$Batch),
-  !anyDuplicated(design_data_68$Run),
-  setequal(
-    design_data_68$Run,
-    colnames(proteins_68[["AlphaDIA"]])
+  !anyDuplicated(design_data_68$Run)
   )
-)
+
 
 # Construct design matrix
 design_matrix_68 <- stats::model.matrix(
@@ -6358,7 +6911,7 @@ if (design_rank_68 < n_parameters_68) {
   cat("\n68-run design matrix is full rank.\n")
 }
 ```
-## 68 Evaluate biologically relevant contrasts
+### - 68 Evaluate biologically relevant contrasts
 ```{r qc_contrast_estimability_68, message=FALSE, warning=FALSE}
 # ============================================================
 # Planned biological contrasts: 68-run analysis
@@ -6521,25 +7074,17 @@ cat(
 )
 ```
 
-## Protein-level missingness and contrast-specific data availability
+## 21. Protein-level missingness and contrast-specific data availability
 ```{r qc_protein_contrast_availability, message=FALSE, warning=FALSE}
 # ============================================================
 # Protein-level missingness and contrast-specific availability
 # ============================================================
-
-qf_list <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-
 protein_availability <- list()
 contrast_availability <- list()
 
-for (software in names(qf_list)) {
+for (software in names(qf_models_83)) {
 
-  se <- qf_list[[software]][["proteins"]]
+  se <- qf_models_83[[software]][["proteins"]]
   x <- assay(se)
 
   # Match sample annotations to assay column order
@@ -6705,222 +7250,10 @@ Although the 6 h and 24 h conditions do not share batches, untreated samples con
 In other word, Protein-level data availability was high across all four DIA analysis pipelines. Between 97.9% and 100% of quantified proteins had at least two observations in each condition for the planned contrasts. Nine of the eleven comparisons had direct within-batch support, whereas comparisons between 6-hour and 24-hour cisplatin treatments lacked overlapping acquisition batches. Although these time-point contrasts were mathematically estimable under the additive batch-adjusted design, their interpretation requires caution because treatment duration and acquisition batch were partially confounded. Overall, the results support proceeding with batch-adjusted differential abundance modeling without additional global completeness filtering.
 
 
-```{r qc_protein_specific_estimability, message=FALSE, warning=FALSE}
-# ============================================================
-# Protein-specific design rank and contrast estimability
-# ============================================================
 
-qf_list <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
 
-# Reconstruct contrast vectors from the existing design matrix
-contrast_matrix <- t(vapply(
-  seq_len(nrow(planned_contrasts)),
-  function(i) {
-    reference_matrix[planned_contrasts$Numerator[i], ] -
-      reference_matrix[planned_contrasts$Denominator[i], ]
-  },
-  numeric(ncol(design_matrix))
-))
 
-rownames(contrast_matrix) <- planned_contrasts$Contrast
-
-# Verify that contrast coefficients match the design matrix
-stopifnot(
-  identical(
-    colnames(contrast_matrix),
-    colnames(design_matrix)
-  ),
-  nrow(design_matrix) == nrow(design_data)
-)
-
-# Assign actual run names to the design matrix
-rownames(design_matrix) <- as.character(design_data$Run)
-
-# Confirm alignment
-stopifnot(
-  identical(
-    rownames(design_matrix),
-    as.character(design_data$Run)
-  )
-)
-
-# Function to evaluate a single observed-sample pattern
-check_pattern <- function(observed, X, C) {
-
-  X_obs <- X[observed, , drop = FALSE]
-
-  if (nrow(X_obs) == 0L) {
-    return(c(
-      Rank = 0,
-      Full_Rank = 0,
-      setNames(
-        rep(0, nrow(C)),
-        paste0("Contrast_", seq_len(nrow(C)))
-      )
-    ))
-  }
-
-  # QR rank of the observed design
-  rank_obs <- qr(X_obs)$rank
-
-  # SVD-based row-space test for contrast estimability
-  sv <- svd(X_obs, nu = 0, nv = ncol(X_obs))
-
-  tolerance <- max(dim(X_obs)) *
-    max(sv$d) *
-    .Machine$double.eps
-
-  rank_svd <- sum(sv$d > tolerance)
-
-  if (rank_svd == ncol(X_obs)) {
-
-    estimable <- rep(TRUE, nrow(C))
-
-  } else {
-
-    null_basis <- sv$v[
-      ,
-      seq.int(rank_svd + 1L, ncol(X_obs)),
-      drop = FALSE
-    ]
-
-    null_projection <- C %*% null_basis
-
-    estimable <- apply(
-      abs(null_projection),
-      1,
-      max
-    ) < 1e-8
-  }
-
-  c(
-    Rank = rank_obs,
-    Full_Rank = as.integer(rank_obs == ncol(X)),
-    setNames(
-      as.integer(estimable),
-      paste0("Contrast_", seq_len(nrow(C)))
-    )
-  )
-}
-
-protein_rank_results <- list()
-protein_contrast_results <- list()
-
-for (software in names(qf_list)) {
-
-  cat("Checking:", software, "\n")
-
-  se <- qf_list[[software]][["proteins"]]
-  x <- assay(se)
-
-  # Align design matrix to the assay columns
-  sample_idx <- match(colnames(x), design_data$Run)
-
-  stopifnot(
-    !anyNA(sample_idx),
-    !anyDuplicated(sample_idx)
-  )
-
-  X <- design_matrix[sample_idx, , drop = FALSE]
-
-  # Finite protein measurements
-  detected <- is.finite(x)
-
-  # Group proteins with identical observed-sample patterns
-  pattern_key <- apply(
-    detected,
-    1,
-    function(z) paste0(as.integer(z), collapse = "")
-  )
-
-  unique_keys <- unique(pattern_key)
-
-  pattern_results <- lapply(unique_keys, function(key) {
-
-    observed <- which(
-      strsplit(key, "", fixed = TRUE)[[1]] == "1"
-    )
-
-    check_pattern(
-      observed = observed,
-      X = X,
-      C = contrast_matrix
-    )
-  })
-
-  pattern_results <- do.call(
-    rbind,
-    pattern_results
-  )
-
-  # Map pattern results back to individual proteins
-  protein_results <- pattern_results[
-    match(pattern_key, unique_keys),
-    ,
-    drop = FALSE
-  ]
-
-  protein_rank_results[[software]] <- data.frame(
-    Software = software,
-    Total_Proteins = nrow(x),
-    Unique_Missingness_Patterns = length(unique_keys),
-    Full_Rank_Proteins = sum(
-      protein_results[, "Full_Rank"] == 1
-    ),
-    Full_Rank_Percent = 100 * mean(
-      protein_results[, "Full_Rank"] == 1
-    ),
-    Median_Protein_Rank = median(
-      protein_results[, "Rank"]
-    ),
-    stringsAsFactors = FALSE
-  )
-
-  protein_contrast_results[[software]] <- data.frame(
-    Software = software,
-    Contrast = planned_contrasts$Contrast,
-    Estimable_Proteins = colSums(
-      protein_results[
-        ,
-        paste0("Contrast_", seq_len(nrow(contrast_matrix))),
-        drop = FALSE
-      ]
-    ),
-    Total_Proteins = nrow(x),
-    stringsAsFactors = FALSE
-  )
-}
-
-protein_rank_summary <- dplyr::bind_rows(
-  protein_rank_results
-)
-
-protein_contrast_estimability <- dplyr::bind_rows(
-  protein_contrast_results
-) |>
-  dplyr::mutate(
-    Estimable_Percent =
-      100 * Estimable_Proteins / Total_Proteins
-  )
-
-cat("\nProtein-specific design rank:\n")
-print(protein_rank_summary, row.names = FALSE)
-
-cat("\nProtein-specific contrast estimability:\n")
-print(
-  protein_contrast_estimability,
-  row.names = FALSE
-)
-```
-The median protein-specific design rank is 12 for every software pipeline, matching the number of model coefficients. This means that nearly all proteins have sufficient observations across the experimental conditions and acquisition batches to estimate every coefficient in the proposed model. Importantly, the remaining rank-deficient proteins are not necessarily unusable. Some can still support particular biological contrasts.
-Protein-specific design matrix diagnostics demonstrated high model identifiability across all four DIA analysis pipelines. Full-rank design matrices were obtained for 98.04% of AlphaDIA proteins, 97.70% of DIA-NN proteins, 99.99% of Spectronaut proteins, and 99.93% of MaxDIA proteins. Across the eleven planned biological contrasts, mathematical estimability exceeded 98.9% for every pipeline. These findings indicate that protein-level missingness is unlikely to substantially restrict differential abundance analysis. Nevertheless, direct comparisons between 6-hour and 24-hour cisplatin treatments remain dependent on additive batch-effect assumptions because the treatment groups were acquired in separate batches. Therefore, subsequent statistical modeling will incorporate acquisition batch as a fixed effect, with cross-time-point comparisons interpreted cautiously.
-
-## 68 Protein-level missingness and contrast-specific data availability
+### - 68 Protein-level missingness and contrast-specific data availability
 ```{r qc_protein_availability_estimability_68, message=FALSE, warning=FALSE}
 
 # 68-run protein availability and contrast estimability
@@ -7033,7 +7366,7 @@ print(protein_contrast_estimability_68, row.names = FALSE)
 
 Following exclusion of Group 4, protein-level completeness across the 68 retained runs was 78.6% for AlphaDIA, 77.0% for DIA-NN, 95.3% for Spectronaut, and 88.6% for MaxDIA. Median protein detection was 68 runs across all four pipelines. Protein-specific design matrices were full rank for 97.3%, 95.8%, 99.9%, and 99.9% of proteins, respectively, with a median rank of 11. Across the 11 planned contrasts, mathematical estimability ranged from 98.3–99.9% for AlphaDIA, 97.1–99.8% for DIA-NN, 99.9–100% for Spectronaut, and 99.9–100% for MaxDIA. Nine contrasts had direct within-batch support, whereas the two 6-hour versus 24-hour comparisons lacked overlapping acquisition batches and therefore require cautious interpretation. Overall, these findings support proceeding with batch-adjusted protein-level differential abundance modeling without additional global completeness filtering.
 
-## Statistical inference
+## 22. Statistical inference
 
 This chunk will:
 - Add the acquisition batch annotation to the colData of all four QFeatures objects.
@@ -7046,12 +7379,7 @@ This chunk will:
 ```{r prepare_batch_metadata_fixed, message=FALSE, warning=FALSE}
 model <- ~ Batch + condition
 
-qf_list <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
+qf_list <- qf_models_83
 
 model_design_summary <- list()
 
@@ -7147,7 +7475,7 @@ model_design_summary <- dplyr::bind_rows(
 print(model_design_summary, row.names = FALSE)
 ```
 
-## 68 Statistical inference
+### - 68 Statistical inference
 ```{r prepare_batch_metadata_fixed_68, message=FALSE, warning=FALSE}
 
 # Prepare batch metadata for 68-run statistical inference
@@ -7244,12 +7572,12 @@ model_design_summary_68 <- dplyr::bind_rows(
 print(model_design_summary_68, row.names = FALSE)
 ```
 
-### Fit the first protein-level model
+## 23. Fit the first protein-level model
 ```{r fit_msqrob_alphadia, message=FALSE, warning=FALSE, eval=run_analysis}
 # ============================================================
-# Robust batch-adjusted protein-level modeling: AlphaDIA
+# Robust batch-adjusted protein-level modeling
+# AlphaDIA, DIA-NN, Spectronaut, and MaxDIA
 # ============================================================
-
 model <- ~ Batch + condition
 
 qf_alpha <- msqrob2::msqrob(
@@ -7258,32 +7586,6 @@ qf_alpha <- msqrob2::msqrob(
   formula = model,
   robust = TRUE
 )
-
-# Retrieve fitted models
-models_alpha <- SummarizedExperiment::rowData(
-  qf_alpha[["proteins"]]
-)$msqrobModels
-
-# Basic model-fitting diagnostics
-cat("Total proteins:",
-    nrow(qf_alpha[["proteins"]]), "\n")
-
-cat("Model entries:",
-    length(models_alpha), "\n")
-
-cat("Missing model entries:",
-    sum(vapply(models_alpha, is.null, logical(1))), "\n")
-
-# Inspect first three model objects
-models_alpha[1:3]
-```
-```{r fit_msqrob_remaining, message=FALSE, warning=FALSE, eval=run_analysis}
-# ============================================================
-# Robust batch-adjusted protein-level modeling
-# DIA-NN, Spectronaut, and MaxDIA
-# ============================================================
-
-model <- ~ Batch + condition
 
 qf_diann <- msqrob2::msqrob(
   qf_diann,
@@ -7335,19 +7637,11 @@ model_fit_summary <- dplyr::bind_rows(
 )
 
 print(model_fit_summary, row.names = FALSE)
-```
 
-```{r qc_msqrob_model_quality, eval=FALSE, message=FALSE, warning=FALSE}
+
 # ============================================================
 # Model-quality diagnostics across all four DIA pipelines
 # ============================================================
-
-qf_models <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
 
 model_quality_summary <- dplyr::bind_rows(
   lapply(names(qf_models), function(software) {
@@ -7451,27 +7745,17 @@ model_quality_summary <- dplyr::bind_rows(
 
 print(model_quality_summary, row.names = FALSE)
 ```
+
+
 These results are encouraging. All four DIA pipelines have successfully produced robust models for the overwhelming majority of proteins, but a small subset requires caution before differential abundance testing. The median residual degrees of freedom are approximately 66 across all four pipelines, suggesting that most models retain substantial information after accounting for batch and condition.
 
-```{r, eval=FALSE}
-colnames(
-  model.matrix(
-    model,
-    data = as.data.frame(
-      SummarizedExperiment::colData(
-        qf_alpha[["proteins"]]
-      )
-    )
-  )
-)
 
-print(planned_contrasts, row.names = FALSE)
-```
+
+
+### - 68 Fit the first protein-level model
 We now have all 11 planned biological contrasts, and their condition names match your batch-adjusted model. We'll preserve the direction of each comparison:
 log2 fold change = Numerator − Denominator
 For example, a positive log2FC for KO vs CTRL cisplatin 6h means higher protein abundance in KO than CTRL at 6h.
-
-### 68 Fit the first protein-level model
 ```{r fit_msqrob_quality_68, message=FALSE, warning=FALSE, eval=run_analysis}
 
 model_fit_summary_68 <- list()
@@ -7558,7 +7842,7 @@ print(model_quality_summary_68, row.names = FALSE)
 Following exclusion of Group 4, robust batch-adjusted protein-level models were fitted across 68 runs using all four DIA analysis pipelines. Model entries were generated for all 11,331 AlphaDIA, 9,833 DIA-NN, 7,970 Spectronaut, and 8,482 MaxDIA protein features. Valid coefficient estimates were obtained for 97.3%, 95.8%, 99.9%, and 99.9% of proteins, respectively. Median residual degrees of freedom ranged from 52.78 to 52.89 across pipelines. These results indicate that the revised experimental design supports robust protein-level modeling for the large majority of quantified proteins, while a small subset remains unsuitable for complete coefficient-based inference.
 
 
-### Construct the contrast matrix
+## 24. Construct the contrast matrix
 ```{r construct_planned_contrasts}
 # ============================================================
 # Construct 11 planned contrasts for batch-adjusted models
@@ -7630,126 +7914,16 @@ cat("Contrast matrix dimensions:", dim(L), "\n")
 print(L)
 ```
 
-```{r hypothesis_test_alphadia, eval= FALSE, message=FALSE, warning=FALSE}
-# ============================================================
-# Hypothesis testing: AlphaDIA
-# 11 planned biological contrasts
-# ============================================================
-
-# L: 12 model coefficients (rows) x 11 contrasts (columns)
-stopifnot(
-  nrow(L) == 12L,
-  ncol(L) == 11L,
-  identical(rownames(L), parameter_names),
-  identical(colnames(L), planned_contrasts$Contrast)
-)
-
-# Avoid repeating hypothesis tests if results already exist
-existing_results <- colnames(
-  SummarizedExperiment::rowData(qf_alpha[["proteins"]])
-)
-
-if (!all(colnames(L) %in% existing_results)) {
-
-  qf_alpha <- msqrob2::hypothesisTest(
-    qf_alpha,
-    i = "proteins",
-    contrast = L
-  )
-
-}
-
-# Confirm all 11 contrasts are present
-result_columns <- colnames(
-  SummarizedExperiment::rowData(qf_alpha[["proteins"]])
-)
-
-stopifnot(all(colnames(L) %in% result_columns))
-
-cat("AlphaDIA: 11 planned contrasts available.\n")
-```
-
-```{r collect_alphadia_results, eval= FALSE, message=FALSE, warning=FALSE}
-# ============================================================
-# Collect AlphaDIA differential abundance results
-# ============================================================
-
-inference_alpha <- msqrob2::msqrobCollect(
-  qf_alpha[["proteins"]],
-  L
-)
-
-# Inspect the result structure before summarizing
-cat("Result dimensions:\n")
-print(dim(inference_alpha))
-
-cat("\nResult columns:\n")
-print(colnames(inference_alpha))
-
-cat("\nFirst three rows:\n")
-print(utils::head(inference_alpha, 3))
-```
-```{r summarize_alphadia_da, eval=FALSE, message=FALSE, warning=FALSE}
-# ============================================================
-# AlphaDIA differential abundance summary
-# ============================================================
-
-alpha_da_summary <- inference_alpha |>
-  dplyr::as_tibble() |>
-  dplyr::group_by(contrast) |>
-  dplyr::summarise(
-    Total_Proteins = dplyr::n(),
-    Valid_Tests = sum(
-      is.finite(pval) & is.finite(adjPval)
-    ),
-    Significant_FDR05 = sum(
-      is.finite(adjPval) & adjPval < 0.05
-    ),
-    Upregulated = sum(
-      is.finite(adjPval) &
-        adjPval < 0.05 &
-        is.finite(logFC) &
-        logFC > 0
-    ),
-    Downregulated = sum(
-      is.finite(adjPval) &
-        adjPval < 0.05 &
-        is.finite(logFC) &
-        logFC < 0
-    ),
-    .groups = "drop"
-  )
-
-# Preserve the biological contrast order
-alpha_da_summary <- alpha_da_summary[
-  match(planned_contrasts$Contrast,
-        alpha_da_summary$contrast),
-]
-
-print(alpha_da_summary, n = Inf, width = Inf)
-```
-Three patterns stand out:
-1. c-Jun KO is associated with substantial proteomic differences, particularly under cisplatin treatment. At 6h, 3,747 proteins differ between KO and CTRL, compared with 1,850 at baseline.
-2. The early cisplatin response differs strongly between genotypes. Relative to their respective baselines, KO has 3,859 significant proteins at 6h versus 434 in CTRL. This suggests a much larger detectable early response in KO, although significance counts alone do not establish the magnitude of biological change.
-3. The JNK inhibitor effect is much more extensive at 24h than 6h (3,670 versus 236 significant proteins). This is an interesting time-dependent pattern worth investigating through effect sizes and pathway enrichment.
-
+## 25. Hypothesis test
 
 ```{r hypothesis_test_remaining, eval=FALSE, message=FALSE, warning=FALSE}
 # ============================================================
-# Hypothesis testing for remaining DIA pipelines
+# Hypothesis testing 
 # ============================================================
-
-# Synchronize with the corrected AlphaDIA object
-qf_models <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-
 # Test only the three remaining pipelines
-for (software in c("DIA-NN", "Spectronaut", "MaxDIA")) {
+for (software in names(qf_models)) {
 
+  print(Software)
   qf_one <- qf_models[[software]]
 
   existing <- colnames(
@@ -7768,6 +7942,7 @@ for (software in c("DIA-NN", "Spectronaut", "MaxDIA")) {
 }
 
 # Update individual objects
+qf_alpha   <- qf_models[["AlphaDIA"]]
 qf_diann   <- qf_models[["DIA-NN"]]
 qf_spectro <- qf_models[["Spectronaut"]]
 qf_maxdia  <- qf_models[["MaxDIA"]]
@@ -7792,7 +7967,8 @@ print(contrast_test_summary, row.names = FALSE)
 stopifnot(all(contrast_test_summary$Contrasts_Present == 11L))
 ```
 
-### 68 Construct the contrast matrix
+### - 68 Hypothesis testing
+
 ```{r hypothesis_testing_68, message=FALSE, warning=FALSE, eval=run_analysis}
 
 # Construct 11 contrasts: numerator minus denominator
@@ -7884,444 +8060,6 @@ stopifnot(all(contrast_test_summary_68$Contrasts_Present == 11L))
 print(da_summary_68, n = Inf, width = Inf)
 ```
 Following exclusion of Group 4, batch-adjusted differential abundance testing was performed for 11 planned contrasts across four DIA analysis pipelines. All 44 pipeline–contrast combinations were successfully evaluated, with high proportions of proteins yielding valid statistical tests. Significant protein counts varied substantially among pipelines, with AlphaDIA and DIA-NN generally identifying more differentially abundant proteins than Spectronaut and MaxDIA. Across all four pipelines, the cisplatin-associated response at 6h yielded more significant proteins in JUN-knockout than control samples, while JNK inhibitor-associated differences were more extensive at 24h than at 6h. These patterns suggest reproducible qualitative trends across analytical workflows despite substantial differences in statistical detection. Direct comparisons of effect sizes and shared protein-level results are required to establish the concordance and biological significance of these findings.
-
-### Protein-identification UpSet plot
-```{r upset_protein_identification, fig.width=12, fig.height=7.5, dpi=300, message=FALSE, warning=FALSE}
-# ============================================================
-# Publication-quality protein identification UpSet plot
-# ============================================================
-
-# Consistent software colors for all subsequent figures
-software_colors <- c(
-  "AlphaDIA"    = "#0072B2",
-  "DIA-NN"      = "#E69F00",
-  "Spectronaut" = "#009E73",
-  "MaxDIA"      = "#CC79A7"
-)
-
-# Extract protein-group identifiers
-protein_sets <- list(
-  AlphaDIA = unique(rownames(qf_alpha[["proteins"]])),
-  `DIA-NN` = unique(rownames(qf_diann[["proteins"]])),
-  Spectronaut = unique(rownames(qf_spectro[["proteins"]])),
-  MaxDIA = unique(rownames(qf_maxdia[["proteins"]]))
-)
-
-# Check set sizes
-protein_id_counts <- data.frame(
-  Software = names(protein_sets),
-  Identified_Proteins = lengths(protein_sets),
-  row.names = NULL
-)
-
-print(protein_id_counts, row.names = FALSE)
-
-# Build presence/absence data
-all_proteins <- unique(unlist(protein_sets, use.names = FALSE))
-
-protein_presence <- data.frame(
-  Protein = all_proteins,
-  check.names = FALSE
-)
-
-for (software in names(protein_sets)) {
-  protein_presence[[software]] <-
-    all_proteins %in% protein_sets[[software]]
-}
-
-stopifnot(
-  identical(
-    as.integer(colSums(protein_presence[names(protein_sets)])),
-    as.integer(lengths(protein_sets))
-  )
-)
-
-# Plot
-p_upset_identification <- ComplexUpset::upset(
-  protein_presence,
-  intersect = names(protein_sets),
-  name = "DIA pipeline",
-  sort_intersections_by = "cardinality",
-  min_size = 1,
-  width_ratio = 0.30,
-
-  set_sizes = ComplexUpset::upset_set_size(
-    geom = ggplot2::geom_bar(
-      fill = unname(software_colors),
-      width = 0.65
-    )
-  ),
-
-  base_annotations = list(
-    "Shared proteins" =
-      ComplexUpset::intersection_size(
-        mapping = ggplot2::aes(fill = "Intersection"),
-        text = list(
-          size = 3,
-          angle = 90,
-          hjust = -0.1,
-          vjust = 0.5,
-          color = "black"
-            )
-        ) +
-        ggplot2::scale_fill_manual(
-          values = c("Intersection" = "#D8D2C8"),
-          guide = "none"
-        ) +
-      ggplot2::scale_y_continuous(
-        labels = scales::comma,
-        expand = ggplot2::expansion(mult = c(0, 0.18))
-      ) +
-      ggplot2::theme(
-        panel.grid.major.x = ggplot2::element_blank(),
-        panel.grid.minor = ggplot2::element_blank()
-      )
-  ),
-
-  stripes = ComplexUpset::upset_stripes(
-    colors = c("white", "#F5F7FA")
-  )
-) +
-  ggplot2::labs(
-    title = "Protein identification overlap",
-    # subtitle = "Shared and pipeline-specific protein groups across 83 samples",
-    # caption = "Exact protein-group identifier matching"
-  ) +
-  ggplot2::theme_minimal(base_size = 12) +
-  ggplot2::theme(
-    plot.title = ggplot2::element_text(
-      face = "bold", size = 17
-    ),
-    plot.subtitle = ggplot2::element_text(
-      size = 11, color = "#667085"
-    ),
-    axis.title = ggplot2::element_text(
-      face = "bold", size = 13
-    ),
-    axis.text = ggplot2::element_text(
-      size = 11, color = "#344054"
-    ),
-    panel.grid.minor = ggplot2::element_blank(),
-    plot.background = ggplot2::element_rect(
-      fill = "white", color = NA
-    )
-  )
-
-print(p_upset_identification)
-```
-The UpSet plot shows substantial agreement in protein identification across the four DIA analysis pipelines, with 7,483 protein groups shared by all four tools, representing a large common proteomic core. However, pipeline-specific differences are also evident, particularly for AlphaDIA, which identifies the largest number of protein groups and contributes 2,413 uniquely identified groups. DIA-NN, MaxDIA, and Spectronaut show smaller tool-specific contributions. These findings suggest that while the pipelines consistently identify a substantial shared proteome, their identification coverage differs considerably. Importantly, the overlaps are based on exact protein-group identifiers, so differences in protein grouping between software packages may contribute to the observed discrepancies.
-
-```{r harmonize_precursor_identifiers, message=FALSE, warning=FALSE}
-# ============================================================
-# Harmonize precursor identifiers across DIA pipelines
-# Stripped peptide sequence + precursor charge
-# ============================================================
-
-qf_precursors <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-
-precursor_sets <- lapply(names(qf_precursors), function(software) {
-
-  rd <- as.data.frame(
-    SummarizedExperiment::rowData(
-      qf_precursors[[software]][["precursors"]]
-    )
-  )
-
-  sequence <- as.character(rd$Stripped.Sequence)
-
-  if (software == "Spectronaut") {
-
-    # Spectronaut precursor IDs end with .charge
-    precursor_id <- as.character(rd$Precursor.Id)
-
-    charge <- ifelse(
-      grepl("\\.[0-9]+$", precursor_id),
-      sub("^.*\\.([0-9]+)$", "\\1", precursor_id),
-      NA_character_
-    )
-
-  } else {
-
-    charge <- as.character(rd$Precursor.Charge)
-
-  }
-
-  # Exclude entries lacking a valid sequence or charge
-  valid <- !is.na(sequence) &
-    nzchar(sequence) &
-    !is.na(charge) &
-    grepl("^[0-9]+$", charge) &
-    as.integer(charge) > 0
-
-  # Collapse modified forms sharing the same sequence and charge
-  unique(
-    paste(sequence[valid], charge[valid], sep = "|")
-  )
-})
-
-names(precursor_sets) <- names(qf_precursors)
-
-# Compare original entries with harmonized identifiers
-precursor_harmonization_summary <- data.frame(
-  Software = names(qf_precursors),
-  Original_Entries = vapply(
-    qf_precursors,
-    function(qf) nrow(qf[["precursors"]]),
-    integer(1)
-  ),
-  Unique_Sequence_Charge = lengths(precursor_sets),
-  row.names = NULL
-)
-
-precursor_harmonization_summary$Collapsed_or_Excluded <-
-  precursor_harmonization_summary$Original_Entries -
-  precursor_harmonization_summary$Unique_Sequence_Charge
-
-print(precursor_harmonization_summary, row.names = FALSE)
-```
-
-```{r upset_precursor_identification, fig.width=13, fig.height=6.5, dpi=300, out.width="100%", message=FALSE, warning=FALSE}
-# ============================================================
-# Precursor sequence-charge identification UpSet plot
-# ============================================================
-
-# Build presence/absence table
-all_precursors <- unique(
-  unlist(precursor_sets, use.names = FALSE)
-)
-
-precursor_presence <- data.frame(
-  Precursor = all_precursors,
-  check.names = FALSE
-)
-
-for (software in names(precursor_sets)) {
-  precursor_presence[[software]] <-
-    all_precursors %in% precursor_sets[[software]]
-}
-
-# Verify set sizes
-stopifnot(
-  identical(
-    as.integer(colSums(precursor_presence[names(precursor_sets)])),
-    as.integer(lengths(precursor_sets))
-  )
-)
-
-# Reuse the software color palette from the protein plot
-p_upset_precursors <- ComplexUpset::upset(
-  precursor_presence,
-  intersect = names(precursor_sets),
-  name = "DIA pipeline",
-  sort_intersections_by = "cardinality",
-  min_size = 1,
-  width_ratio = 0.30,
-
-  set_sizes = ComplexUpset::upset_set_size(
-    geom = ggplot2::geom_bar(
-      fill = unname(software_colors),
-      width = 0.65
-    )
-  ),
-
-  base_annotations = list(
-    "Shared precursors" =
-      ComplexUpset::intersection_size(
-        mapping = ggplot2::aes(fill = "Intersection"),
-        text = list(
-          size = 3,
-          angle = 90,
-          hjust = -0.1,
-          vjust = 0.5,
-          color = "black"
-            )
-        ) +
-        ggplot2::scale_fill_manual(
-          values = c("Intersection" = "#D8D2C8"),
-          guide = "none"
-        ) +
-      ggplot2::scale_y_continuous(
-        labels = scales::comma,
-        expand = ggplot2::expansion(mult = c(0, 0.25))
-      ) +
-      ggplot2::theme(
-        panel.grid.major.x = ggplot2::element_blank(),
-        panel.grid.minor = ggplot2::element_blank()
-      )
-  ),
-
-  stripes = ComplexUpset::upset_stripes(
-    colors = c("white", "#F5F7FA")
-  )
-) +
-  ggplot2::labs(
-    title = "Precursor identification overlap",
-    # subtitle = "Shared and pipeline-specific peptide sequence–charge combinations",
-    # caption = paste(
-    #   "Identifiers harmonized using stripped peptide sequence and charge;",
-    #   "modified forms with identical sequence and charge are collapsed."
-    # )
-  ) +
-  ggplot2::theme_minimal(base_size = 12) +
-  ggplot2::theme(
-    plot.title = ggplot2::element_text(
-      face = "bold", size = 17
-    ),
-    plot.subtitle = ggplot2::element_text(
-      size = 11, color = "#667085"
-    ),
-    plot.caption = ggplot2::element_text(
-      size = 9, color = "#667085"
-    ),
-    axis.title = ggplot2::element_text(
-      face = "bold", size = 13
-    ),
-    axis.text = ggplot2::element_text(
-      size = 11, color = "#344054"
-    ),
-    panel.grid.minor = ggplot2::element_blank(),
-    plot.background = ggplot2::element_rect(
-      fill = "white", color = NA
-    )
-  )
-
-print(p_upset_precursors)
-```
-Precursor-level identification overlap revealed a substantial shared proteomic core across the four DIA analysis pipelines, with 113,518 peptide sequence–charge combinations identified by all four tools. Nevertheless, considerable pipeline-specific variation was observed, particularly for MaxDIA, which identified the largest number of unique combinations (62,518). Spectronaut exhibited the highest proportion of identifications belonging to the four-way intersection (71.5%), despite having the smallest overall sequence–charge identification set. Compared with the protein-level analysis, these findings indicate greater heterogeneity in precursor identification than in protein-group coverage. This suggests that differences in precursor-level detection and reporting may not translate directly into equivalent differences in protein identification.
-
-```{r precursor_coverage_per_protein, fig.width=11, fig.height=6, dpi=300, message=FALSE, warning=FALSE}
-
-# ============================================================
-# Sequence-charge coverage per protein group across DIA tools
-# ============================================================
-
-library(dplyr)
-library(ggplot2)
-
-qf_coverage <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-
-# Calculate the number of distinct sequence-charge combinations
-# assigned to each protein-group annotation.
-get_protein_coverage <- function(qf, software) {
-
-  rd <- as.data.frame(
-    SummarizedExperiment::rowData(qf[["precursors"]])
-  )
-
-  sequence <- as.character(rd$Stripped.Sequence)
-
-  if (software == "Spectronaut") {
-    precursor_id <- as.character(rd$Precursor.Id)
-
-    charge <- ifelse(
-      grepl("\\.[0-9]+$", precursor_id),
-      sub("^.*\\.([0-9]+)$", "\\1", precursor_id),
-      NA_character_
-    )
-  } else {
-    charge <- as.character(rd$Precursor.Charge)
-  }
-
-  protein_group <- trimws(as.character(rd$Protein.Group))
-
-  valid <- !is.na(sequence) & nzchar(sequence) &
-    !is.na(charge) & grepl("^[0-9]+$", charge) &
-    as.integer(charge) > 0 &
-    !is.na(protein_group) & nzchar(protein_group)
-
-  precursor_mapping <- data.frame(
-    Protein.Group = protein_group[valid],
-    Sequence_Charge = paste(
-      sequence[valid], charge[valid], sep = "|"
-    )
-  )
-
-  # Remove duplicate sequence-charge / protein-group mappings
-  precursor_mapping <- unique(precursor_mapping)
-
-  coverage <- precursor_mapping %>%
-    dplyr::count(Protein.Group, name = "Precursor_Count")
-
-  coverage$Software <- software
-
-  coverage
-}
-
-protein_coverage <- dplyr::bind_rows(
-  lapply(names(qf_coverage), function(software) {
-    get_protein_coverage(qf_coverage[[software]], software)
-  })
-)
-
-protein_coverage$Software <- factor(
-  protein_coverage$Software,
-  levels = names(qf_coverage)
-)
-
-# Summary statistics
-protein_coverage_summary <- protein_coverage %>%
-  group_by(Software) %>%
-  summarise(
-    Protein_Groups_With_Precursors = n(),
-    Mean_Precursors = mean(Precursor_Count),
-    Median_Precursors = median(Precursor_Count),
-    Q1 = quantile(Precursor_Count, 0.25),
-    Q3 = quantile(Precursor_Count, 0.75),
-    Max_Precursors = max(Precursor_Count),
-    .groups = "drop"
-  )
-
-print(protein_coverage_summary, n = Inf)
-
-# Visualize coverage distribution
-p_precursor_coverage <- ggplot(
-  protein_coverage,
-  aes(x = Software, y = Precursor_Count, fill = Software)
-) +
-  geom_boxplot(
-    outlier.shape = NA,
-    width = 0.6,
-    alpha = 0.8
-  ) +
-  scale_fill_manual(values = software_colors) +
-  scale_y_log10(
-    breaks = c(1, 2, 5, 10, 20, 50, 100, 200, 500),
-    labels = scales::comma
-  ) +
-  labs(
-    title = "Precursor coverage per protein group",
-    #subtitle = "Distinct sequence–charge combinations assigned to each protein-group annotation",
-    x = NULL,
-    y = "Precursors per protein",
-    # caption = paste(
-    #   "Counts derived from precursor-level protein-group annotations;",
-    #   "modified forms sharing sequence and charge are collapsed."
-    # )
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    plot.title = element_text(face = "bold", size = 15),
-    plot.subtitle = element_text(size = 10),
-    legend.position = "none",
-    axis.text.x = element_text(face = "bold"),
-    panel.grid.minor = element_blank()
-  )
-
-print(p_precursor_coverage)
-
-```
-
-To investigate the discrepancy between MaxDIA's high precursor-level coverage and its comparatively lower protein-group identification count, the number of distinct peptide sequence–charge combinations assigned to each protein group was examined. MaxDIA exhibited the highest mean (27.1) and median (20) sequence–charge combinations per protein group, compared with Spectronaut (19.9 and 13), DIA-NN (19.2 and 12), and AlphaDIA (16.0 and 10), respectively. Furthermore, 99.1% of MaxDIA-specific sequence–charge combinations were associated with protein accessions also identified by at least one other pipeline. Together, these findings indicate that MaxDIA's increased precursor-level identification coverage predominantly reflects greater sequence–charge representation of already identified proteins rather than a proportional expansion of protein-group coverage. Nevertheless, differences in precursor reporting, protein inference, and filtering may also contribute to the observed variation.
 
 ### 68 Protein-identification UpSet plot
 ```{r identification_overlap_68, fig.width=12, fig.height=7, dpi=300, message=FALSE, warning=FALSE}
