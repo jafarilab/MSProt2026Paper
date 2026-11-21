@@ -9852,9 +9852,14 @@ We therefore examine the experimental design before evaluating overall
 cisplatin-associated changes and genotype-dependent differences in response.
 
 ```{r temporal-design-check}
-library(dplyr)
-library(tidyr)
-library(ggplot2)
+# ============================================================
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+qf_models_83 <- readRDS(paste0(cache_dir, "/qf_models_83runs.rds"))
+planned_contrasts <- qf_models_83$planned_contrasts
+qf_models <- qf_models_83$qf_models
+design_data <- qf_models_83$design_data
 
 # Focus on CTRL and KO baseline/cisplatin conditions
 temporal_conditions <- c(
@@ -9920,9 +9925,62 @@ p_temporal_design <- ggplot(
   )
 
 print(p_temporal_design)
-```
 
-```{r temporal-joint-contrasts, eval=FALSE}
+model <- ~ Batch + condition
+
+# Model coefficient names
+parameter_names <- colnames(
+  stats::model.matrix(
+    model,
+    data = as.data.frame(
+      SummarizedExperiment::colData(qf_models[["AlphaDIA"]][["proteins"]])
+    )
+  )
+)
+
+# Reference condition has no explicit coefficient
+reference_condition <- "CTRL_cDDP_24h"
+
+# Build a coefficient vector for each condition
+condition_vector <- function(condition, parameter_names) {
+
+  v <- stats::setNames(
+    numeric(length(parameter_names)),
+    parameter_names
+  )
+
+  if (condition != reference_condition) {
+    coefficient <- paste0("condition", condition)
+
+    stopifnot(coefficient %in% parameter_names)
+
+    v[coefficient] <- 1
+  }
+
+  v
+}
+
+# Each contrast is numerator minus denominator
+L <- vapply(
+  seq_len(nrow(planned_contrasts)),
+  function(i) {
+    condition_vector(
+      planned_contrasts$Numerator[i],
+      parameter_names
+    ) -
+      condition_vector(
+        planned_contrasts$Denominator[i],
+        parameter_names
+      )
+  },
+  FUN.VALUE = stats::setNames(
+    numeric(length(parameter_names)),
+    parameter_names
+  )
+)
+
+rownames(L) <- parameter_names
+colnames(L) <- planned_contrasts$Contrast
 # Reuse the existing coefficient-by-contrast matrix L
 # Rows: model coefficients; columns: contrasts
 
@@ -9980,17 +10038,11 @@ stopifnot(
 print(L_temporal_interaction)
 ```
 
+
+
+
 ```{r temporal-joint-tests, eval=FALSE}
-library(dplyr)
-
 # Existing fitted protein models
-qf_models <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
-
 # Uses temporal_matrices created in the previous chunk:
 # CTRL_response, KO_response, Genotype_interaction
 
@@ -10104,37 +10156,17 @@ temporal_joint_summary <- temporal_joint_results |>
   )
 
 print(temporal_joint_summary, n = Inf)
-```
-These results show a clear pattern: the c-Jun KO samples exhibit a broader cisplatin-associated proteomic response than CTRL, and all four pipelines detect evidence of genotype-dependent responses.
 
-1. KO response is consistently more extensive than CTRL response.
+# ----------------------------------------
+# ---- temporal interaction agreement ------
+# ---------------------------------------
 
-Across all four pipelines, substantially more proteins show a significant joint cisplatin-associated response in KO than CTRL. This is consistent with c-Jun loss being associated with altered cellular responses to cisplatin.
-
-However, significance counts alone do not establish that KO responses have larger effect sizes or that every response is stronger. We would need to examine the direction and magnitude of the individual changes.
-
-2. The genotype interaction is substantial.
-
-AlphaDIA identifies 2,820 proteins, DIA-NN 2,678, and Spectronaut 1,698 with significant joint genotype-dependent responses. MaxDIA identifies 280.
-
-This means that, for those proteins, the KO-versus-CTRL difference in cisplatin-associated abundance changes is statistically detectable at 6h, 24h, or both.
-
-It does not necessarily mean that a protein responds significantly in KO but not CTRL. The interaction directly tests the difference between the two responses, which is the more appropriate statistical question.
-
-3. MaxDIA remains much less sensitive.
-
-Its lower discovery counts are consistent with your earlier finding of substantially higher residual variability and contrast standard errors in MaxDIA. The joint test has not eliminated that difference.
-
-4. The experimental batch structure still matters.
-
-The 6h and 24h cisplatin samples occupy different batches. The fitted additive batch model adjusts for this, but interpretation relies on its assumptions. These are cisplatin-response comparisons across experimental conditions, not repeated measurements of the same samples over time.
-
-
-```{r temporal-interaction-agreement, eval=FALSE}
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-
+software_colors <- c(
+  AlphaDIA = "#0072B2",
+  `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA = "#CC79A7"
+)
 # Retain genotype-interaction tests with valid p-values
 interaction_results <- temporal_joint_results |>
   filter(
@@ -10146,10 +10178,10 @@ interaction_results <- temporal_joint_results |>
 
 # Keep only proteins tested by all four pipelines
 shared_interaction_proteins <- interaction_results |>
-  distinct(Software, Protein) |>
-  count(Protein, name = "N_pipelines") |>
-  filter(N_pipelines == length(qf_models)) |>
-  pull(Protein)
+  dplyr::distinct(Software, Protein) |>
+  dplyr::count(Protein, name = "N_pipelines") |>
+  dplyr::filter(N_pipelines == length(qf_models)) |>
+  dplyr::pull(Protein)
 
 interaction_shared <- interaction_results |>
   filter(Protein %in% shared_interaction_proteins) |>
@@ -10186,7 +10218,7 @@ interaction_significance <- interaction_significance |>
   )
 
 interaction_overlap_summary <- interaction_significance |>
-  count(N_significant, name = "Proteins") |>
+  dplyr::count(N_significant, name = "Proteins") |>
   arrange(N_significant)
 
 print(interaction_overlap_summary)
@@ -10228,19 +10260,10 @@ p_interaction_agreement <- interaction_overlap_summary |>
   )
 
 print(p_interaction_agreement)
-```
-243 proteins have significant genotype-dependent cisplatin responses in all four DIA pipelines, despite substantial differences in the total number of discoveries. The most interesting observation is that MaxDIA identifies only 273 significant interaction proteins among the shared proteins, while 243 proteins are significant in all four pipelines. This means at least 89.0% of MaxDIA's interaction discoveries are supported by all three other pipelines.
 
-That suggests MaxDIA's smaller discovery set is largely a high-confidence subset of the other pipelines' discoveries, rather than a completely different biological signal. This is consistent with your earlier finding that MaxDIA has higher residual variability and lower statistical sensitivity.
-
-One caveat: these 243 proteins agree in statistical significance, not necessarily in the direction of their 6h and 24h interaction effects.
-
-
-```{r temporal-interaction-effect-agreement, eval=FALSE}
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-
+# ----------------------------------------
+# -- temporal interaction effect agreement ---
+# -----------------------------------------------
 # Extract the two genotype-interaction effect estimates
 interaction_effects <- lapply(names(qf_models), function(software) {
 
@@ -10390,9 +10413,10 @@ p_interaction_effects <- interaction_effects |>
   )
 
 print(p_interaction_effects)
-```
 
-```{r temporal-interaction-time-specific, eval=FALSE}
+# ----------------------------------
+# ---- temporal interaction time specific ---
+# -------------------------------------------
 # Test each interaction contrast using the existing fitted models
 # Test and collect the two individual interaction contrasts
 interaction_time_results <- lapply(names(qf_models), function(software) {
@@ -10462,7 +10486,7 @@ interaction_time_status <- interaction_time_results |>
   )
 
 interaction_time_pattern_summary <- interaction_time_status |>
-  count(Software, Response_pattern, name = "Proteins") |>
+  dplyr::count(Software, Response_pattern, name = "Proteins") |>
   complete(
     Software = names(qf_models),
     Response_pattern = c(
@@ -10526,6 +10550,40 @@ p_interaction_time_patterns <- interaction_time_pattern_summary |>
 
 print(p_interaction_time_patterns)
 ```
+These results show a clear pattern: the c-Jun KO samples exhibit a broader cisplatin-associated proteomic response than CTRL, and all four pipelines detect evidence of genotype-dependent responses.
+
+1. KO response is consistently more extensive than CTRL response.
+
+Across all four pipelines, substantially more proteins show a significant joint cisplatin-associated response in KO than CTRL. This is consistent with c-Jun loss being associated with altered cellular responses to cisplatin.
+
+However, significance counts alone do not establish that KO responses have larger effect sizes or that every response is stronger. We would need to examine the direction and magnitude of the individual changes.
+
+2. The genotype interaction is substantial.
+
+AlphaDIA identifies 2,820 proteins, DIA-NN 2,678, and Spectronaut 1,698 with significant joint genotype-dependent responses. MaxDIA identifies 280.
+
+This means that, for those proteins, the KO-versus-CTRL difference in cisplatin-associated abundance changes is statistically detectable at 6h, 24h, or both.
+
+It does not necessarily mean that a protein responds significantly in KO but not CTRL. The interaction directly tests the difference between the two responses, which is the more appropriate statistical question.
+
+3. MaxDIA remains much less sensitive.
+
+Its lower discovery counts are consistent with your earlier finding of substantially higher residual variability and contrast standard errors in MaxDIA. The joint test has not eliminated that difference.
+
+4. The experimental batch structure still matters.
+
+The 6h and 24h cisplatin samples occupy different batches. The fitted additive batch model adjusts for this, but interpretation relies on its assumptions. These are cisplatin-response comparisons across experimental conditions, not repeated measurements of the same samples over time.
+
+--------------------------------------------
+
+243 proteins have significant genotype-dependent cisplatin responses in all four DIA pipelines, despite substantial differences in the total number of discoveries. The most interesting observation is that MaxDIA identifies only 273 significant interaction proteins among the shared proteins, while 243 proteins are significant in all four pipelines. This means at least 89.0% of MaxDIA's interaction discoveries are supported by all three other pipelines.
+
+That suggests MaxDIA's smaller discovery set is largely a high-confidence subset of the other pipelines' discoveries, rather than a completely different biological signal. This is consistent with your earlier finding that MaxDIA has higher residual variability and lower statistical sensitivity.
+
+One caveat these 243 proteins agree in statistical significance, not necessarily in the direction of their 6h and 24h interaction effects.
+
+--------------------------------------
+
 To investigate genotype-dependent cisplatin responses, two-degree-of-freedom joint tests were performed using the existing batch-adjusted, moderated protein abundance models. The tests evaluated cisplatin-associated changes at 6 and 24 hours relative to untreated baseline in CTRL and c-Jun KO cells, as well as differences in these responses between genotypes.
 
 All four DIA pipelines identified more proteins with significant cisplatin-associated responses in c-Jun KO cells than in CTRL cells. Significant joint genotype interactions were also detected across all pipelines, although the number of discoveries varied substantially. When the analysis was restricted to 7,466 proteins tested by all four pipelines, DIA-NN identified 2,395 significant genotype interactions, followed by AlphaDIA (2,102), Spectronaut (1,632), and MaxDIA (273). Of these, 243 proteins were significant in all four pipelines, representing 89.0% of MaxDIA's significant interaction proteins.
@@ -10535,12 +10593,15 @@ The 243 consensus proteins showed particularly strong agreement at 6 hours. All 
 Together, these findings indicate that the strongest cross-pipeline consensus in genotype-dependent cisplatin responses is concentrated at 6 hours. The results also reinforce the broader benchmarking findings: pipelines differ substantially in their ability to detect statistically significant abundance changes, while showing strong agreement in effect direction and magnitude for robust shared signals. Because the experimental conditions were distributed unevenly across acquisition batches, temporal comparisons should be interpreted as batch-adjusted cisplatin-response contrasts rather than longitudinal measurements.
 
 
-### 68 Temporal patterns of cisplatin response and c-Jun-dependent regulation
+### - 68 Temporal patterns of cisplatin response and c-Jun-dependent regulation
 ```{r temporal_cisplatin_analysis_68, message=FALSE, warning=FALSE, eval=run_analysis}
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
 
-library(dplyr)
-library(tidyr)
-library(ggplot2)
+qf_models_68 <- readRDS(paste0(cache_dir, "/qf_models_68runs.rds"))
+planned_contrasts_68 <- qf_models_68$planned_contrasts
+qf_models <- qf_models_68$qf_models
+design_data_68 <- qf_models_68$design_data
 
 software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
 
@@ -10613,6 +10674,40 @@ print(p_temporal_design_68)
 # ============================================================
 # 2. Construct three joint temporal hypotheses
 # ============================================================
+
+design_matrix_68 <- stats::model.matrix(
+    ~ Batch + condition,
+    data = design_data_68
+)
+
+reference_data_68 <- data.frame(
+  Batch = factor(
+    rep("Group1", nlevels(design_data_68$condition)),
+    levels = levels(design_data_68$Batch)
+  ),
+  condition = factor(
+    levels(design_data_68$condition),
+    levels = levels(design_data_68$condition)
+  )
+)
+reference_matrix_68 <- stats::model.matrix(
+  ~ Batch + condition,
+  data = reference_data_68
+)
+
+rownames(reference_matrix_68) <-
+  as.character(reference_data_68$condition)
+
+# Construct 11 contrasts: numerator minus denominator
+parameter_names_68 <- colnames(design_matrix_68)
+
+L_68 <- vapply(seq_len(nrow(planned_contrasts_68)), function(i) {
+  reference_matrix_68[planned_contrasts_68$Numerator[i], ] -
+    reference_matrix_68[planned_contrasts_68$Denominator[i], ]
+}, numeric(length(parameter_names_68)))
+
+rownames(L_68) <- parameter_names_68
+colnames(L_68) <- planned_contrasts_68$Contrast
 
 stopifnot(
   nrow(L_68) == 11L,
@@ -10728,7 +10823,7 @@ for (sw in software_order_68) {
 
   cat("Joint temporal tests:", sw, "\n")
 
-  se <- qf_models_68[[sw]][["proteins"]]
+  se <- qf_models[[sw]][["proteins"]]
   models <- SummarizedExperiment::rowData(se)[["msqrobModels"]]
 
   for (hypothesis in names(temporal_matrices_68)) {
@@ -10840,15 +10935,25 @@ p_interaction_agreement_68 <- ggplot(
   geom_text(aes(label = Proteins), vjust = -0.3, size = 3.5) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
   labs(
-    title = "Cross-pipeline agreement in genotype-dependent cisplatin response",
-    subtitle = "Proteins tested by all four pipelines; BH FDR < 0.05",
-    x = "Number of pipelines detecting a significant interaction",
+    title = "Cross-pipeline interaction agreement",
+ #   subtitle = "Proteins tested by all four pipelines; BH FDR < 0.05",
+    x = "Pipelines detecting significant interaction",
     y = "Number of proteins"
   ) +
   theme_bw(base_size = 12)
 
 print(p_interaction_agreement_68)
 
+
+ggplot2::ggsave(
+    paste0("Outputs/p_interaction_agreement_68.pdf"),
+    plot = p_interaction_agreement_68,
+    device = grDevices::cairo_pdf,
+    width = 4,
+    height = 3,
+    bg = "white")
+
+saveRDS(p_interaction_agreement_68, paste0("Outputs/p_interaction_agreement_68.rds"))
 # ============================================================
 # 5. Effect-size agreement among consensus proteins
 # ============================================================
@@ -10856,7 +10961,7 @@ print(p_interaction_agreement_68)
 interaction_effects_68 <- bind_rows(
   lapply(software_order_68, function(sw) {
 
-    se <- qf_models_68[[sw]][["proteins"]]
+    se <- qf_models[[sw]][["proteins"]]
     models <- SummarizedExperiment::rowData(se)[["msqrobModels"]]
     C <- L_temporal_interaction_68
 
@@ -10952,19 +11057,15 @@ p_interaction_effects_68 <- ggplot(
   interaction_effects_68,
   aes(Software, Interaction_log2FC, group = Protein)
 ) +
-  geom_line(alpha = 0.08, color = "grey45") +
-  geom_point(aes(color = Software), alpha = 0.35, size = 0.7) +
+  geom_line(alpha = 0.2, color = "grey45") +
+  geom_point(aes(color = Software), alpha = 0.55, size = 0.7) +
   geom_hline(yintercept = 0, linetype = "dashed") +
   facet_wrap(~ Time, nrow = 1) +
   scale_color_manual(values = software_colors) +
   labs(
-    title = "Genotype-interaction effect sizes across DIA pipelines",
-    subtitle = paste(
-      length(interaction_consensus_68),
-      "proteins significant in all four joint interaction tests"
-    ),
+    title = "Genotype-interaction effect sizes",
     x = NULL,
-    y = "KO response minus CTRL response (log2 scale)"
+    y = "KO response minus CTRL response \n(log2 scale)"
   ) +
   theme_bw(base_size = 12) +
   theme(
@@ -10974,6 +11075,15 @@ p_interaction_effects_68 <- ggplot(
 
 print(p_interaction_effects_68)
 
+ggplot2::ggsave(
+    paste0("Outputs/p_interaction_effects_68.pdf"),
+    plot = p_interaction_effects_68,
+    device = grDevices::cairo_pdf,
+    width = 3.6,
+    height = 4,
+    bg = "white")
+
+saveRDS(p_interaction_effects_68, paste0("Outputs/p_interaction_effects_68.rds"))
 # ============================================================
 # 6. Individual 6h and 24h genotype-interaction tests
 # ============================================================
@@ -10983,7 +11093,7 @@ interaction_time_results_68 <- bind_rows(
 
     # Work on a temporary object; retain the fitted original
     qf <- msqrob2::hypothesisTest(
-      qf_models_68[[sw]],
+      qf_models[[sw]],
       i = "proteins",
       contrast = L_temporal_interaction_68,
       resultsColumnNamePrefix = "temporal_"
@@ -11056,49 +11166,357 @@ interaction_time_pattern_summary_68 <- interaction_time_status_68 |>
 
 print(interaction_time_pattern_summary_68, n = Inf)
 
-p_interaction_time_patterns_68 <- interaction_time_pattern_summary_68 |>
-  mutate(
+interaction_pattern_plot_68 <- interaction_time_pattern_summary_68 |>
+  dplyr::mutate(
+    Software = factor(
+      Software,
+      levels = software_order_68
+    ),
     Response_pattern = factor(
       Response_pattern,
       levels = c(
-        "6h only",
         "Both 6h and 24h",
+        "6h only",
         "24h only",
         "Neither individually"
       )
-    ),
-    Software = factor(Software, levels = software_order_68)
+    )
   ) |>
-  ggplot(aes(Software, Proteins, fill = Response_pattern)) +
-  geom_col(width = 0.75) +
-  scale_fill_brewer(palette = "Set2") +
-  guides(fill = guide_legend(nrow = 2, byrow = TRUE, title = NULL)) +
-  labs(
-    title = "Time-specific genotype interactions",
-    subtitle = paste(
-      length(interaction_consensus_68),
-      "proteins significant in all four joint interaction tests"
-    ),
-    x = NULL,
-    y = "Number of proteins"
-  ) +
-  theme_bw(base_size = 12) +
-  theme(
-    legend.position = "bottom",
-    legend.justification = "center",
-    legend.text = element_text(size = 10),
-    legend.key.size = grid::unit(0.35, "cm"),
-    legend.spacing.y = grid::unit(0, "cm"),
-    legend.margin = margin(0, 0, 0, 0),
-    plot.margin = margin(3, 3, 3, 3),
-    axis.text.x = element_text(angle = 30, hjust = 1)
+  dplyr::group_by(Software) |>
+  dplyr::mutate(
+    Percent = if (sum(Proteins) > 0) {
+      100 * Proteins / sum(Proteins)
+    } else {
+      NA_real_
+    }
+  ) |>
+  dplyr::ungroup()
+
+p_interaction_time_patterns_68 <-  ggplot2::ggplot(
+  interaction_pattern_plot_68,
+  ggplot2::aes(
+    x = Software,
+    y = Percent,
+    fill = Response_pattern
   )
+) +
+  ggplot2::geom_col(
+    width = 0.7,
+    color = "white",
+    linewidth = 0.3
+  ) +
+  ggplot2::geom_text(
+    ggplot2::aes(
+      label = ifelse(
+        Percent >= 7,
+        paste0(round(Percent), "%"),
+        ""
+      )
+    ),
+    position = ggplot2::position_stack(vjust = 0.5),
+    size = 3.3
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c(
+      "Both 6h and 24h" = "#9933FF",
+      "6h only" = "#E69F00",
+      "24h only" = "#56B4E9",
+      "Neither individually" = "#BDBDBD"
+    )
+  ) +
+  ggplot2::scale_y_continuous(
+    labels = function(x) paste0(x, "%"),
+    limits = c(0, 100),
+    expand = c(0, 0)
+  ) +
+  ggplot2::labs(
+    title = "Time-specific interaction patterns",
+    x = NULL,
+    y = "Proportion of consensus proteins",
+    fill = NULL
+  ) +
+  ggplot2::theme_minimal(base_size = 12) +
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE, title = NULL)) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(
+      face = "bold"
+    ),
+    axis.text.x = ggplot2::element_text(
+      face = "bold"
+    ),
+    legend.position = "bottom",
+    panel.grid.minor = ggplot2::element_blank()
+  )
+
 
 print(p_interaction_time_patterns_68)
 
-cat("\nCompleted temporal cisplatin analysis (68 runs).\n")
-gc(verbose = FALSE)
+ggplot2::ggsave(
+    paste0("Outputs/p_interaction_time_patterns_68.pdf"),
+    plot = p_interaction_time_patterns_68,
+    device = grDevices::cairo_pdf,
+    width = 4,
+    height = 4,
+    bg = "white")
 
+saveRDS(p_interaction_time_patterns_68, paste0("Outputs/p_interaction_time_patterns_68.rds"))
+
+# -------------------------------------------------
+# --- H0: Delta6h - Delta24h = 0 ------------------
+# --- H1: Delta_t = (KO_t - KO_baseline) - (CTRL_t - CTRL_baseline)
+
+#  Positive change: The signed KO-minus-CTRL cisplatin response difference is greater at 6 h than at 24 h.
+#  Negative change: The signed difference is smaller at 6 h than at 24 h.
+#  Not significant: No statistically significant difference between the two interaction estimates was detected.
+
+# -------------------------------------------------
+# ============================================================
+# Genotype-interaction change: 6h minus 24h
+# Test whether genotype-dependent responses change over time
+# ============================================================
+
+# Use the previously constructed contrast
+stopifnot(
+  is.matrix(L_interaction_change_68),
+  ncol(L_interaction_change_68) == 1L,
+  !is.null(rownames(L_interaction_change_68)),
+  !is.null(colnames(L_interaction_change_68)),
+  all(is.finite(L_interaction_change_68))
+)
+
+print(L_interaction_change_68)
+
+# ------------------------------------------------------------
+# 1. Hypothesis testing across all four pipelines
+# ------------------------------------------------------------
+
+interaction_change_list_68 <- list()
+
+for (sw in software_order_68) {
+  
+  message("Testing temporal interaction change: ", sw)
+  
+  # Use a temporary object to preserve the original models
+  qf_tmp <- msqrob2::hypothesisTest(
+    qf_models[[sw]],
+    i = "proteins",
+    contrast = L_interaction_change_68,
+    adjust.method = "BH",
+    resultsColumnNamePrefix = "temporal_change_"
+  )
+  
+  # Collect the single-contrast inference results
+  results <- msqrob2::msqrobCollect(
+    qf_tmp[["proteins"]],
+    contrast = L_interaction_change_68,
+    resultsColumnNamePrefix = "temporal_change_"
+  )
+  
+  interaction_change_list_68[[sw]] <- as.data.frame(results) |>
+    dplyr::mutate(
+      Software = sw,
+      .before = 1
+    )
+  
+  rm(qf_tmp, results)
+  invisible(gc(verbose = FALSE))
+}
+
+interaction_change_results_68 <- dplyr::bind_rows(
+  interaction_change_list_68
+)
+
+# Inspect results
+print(head(interaction_change_results_68))
+
+
+# ============================================================
+# Temporal interaction changes among consensus proteins
+# Significant joint genotype interactions in all four pipelines
+# ============================================================
+
+# Create a complete protein x software grid
+# This retains missing or untestable combinations
+consensus_change_68 <- tidyr::expand_grid(
+  Software = software_order_68,
+  feature = unique(as.character(interaction_consensus_68))
+) |>
+  dplyr::left_join(
+    interaction_change_results_68 |>
+      dplyr::mutate(
+        Software = as.character(Software),
+        feature = as.character(feature)
+      ) |>
+      dplyr::select(Software, feature, logFC, adjPval),
+    by = c("Software", "feature")
+  ) |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68),
+    Significant = is.finite(adjPval) &
+      adjPval < 0.05,
+    Direction = dplyr::case_when(
+      Significant & logFC > 0 ~ "Positive change",
+      Significant & logFC < 0 ~ "Negative change",
+      TRUE ~ "Not significant"
+    )
+  )
+
+
+temporal_direction_agreement_68 <- consensus_change_68 |>
+  dplyr::filter(
+    is.finite(logFC),
+    feature %in% interaction_consensus_68
+  ) |>
+  dplyr::group_by(feature) |>
+  dplyr::summarise(
+    N_pipelines = dplyr::n_distinct(Software),
+    All_positive = N_pipelines == 4L && all(logFC > 0),
+    All_negative = N_pipelines == 4L && all(logFC < 0),
+    .groups = "drop"
+  ) |>
+  dplyr::filter(N_pipelines == 4L)
+
+temporal_direction_agreement_68 |>
+  dplyr::summarise(
+    N = dplyr::n(),
+    All_positive = sum(All_positive),
+    All_negative = sum(All_negative),
+    Same_direction_pct =
+      100 * mean(All_positive | All_negative)
+  )
+
+message("For all 17 consensus proteins, the four DIA pipelines agree on the sign of the estimated change in genotype interaction between 6 h and 24 h")
+
+# Summary
+consensus_change_summary_68 <- consensus_change_68 |>
+  dplyr::group_by(Software) |>
+  dplyr::summarise(
+    Consensus_Proteins = dplyr::n(),
+    Tested = sum(is.finite(logFC) & is.finite(adjPval)),
+    Significant = sum(Significant),
+    Positive = sum(Direction == "Positive change"),
+    Negative = sum(Direction == "Negative change"),
+    Percent_Significant = round(
+      100 * Significant / Tested, 1
+    ),
+    .groups = "drop"
+  )
+
+print(consensus_change_summary_68)
+
+
+# ============================================================
+# Temporal interaction changes: consensus proteins only
+# ============================================================
+
+consensus_plot_data_68 <- consensus_change_68 |>
+  dplyr::filter(
+    is.finite(logFC),
+    is.finite(adjPval)
+  ) |>
+  dplyr::group_by(Software, Direction) |>
+  dplyr::summarise(
+    Proteins = dplyr::n(),
+    .groups = "drop"
+  ) |>
+  tidyr::complete(
+    Software = factor(
+      software_order_68,
+      levels = software_order_68
+    ),
+    Direction = c(
+      "Positive change",
+      "Negative change",
+      "Not significant"
+    ),
+    fill = list(Proteins = 0)
+  ) |>
+  dplyr::group_by(Software) |>
+  dplyr::mutate(
+    Percent = if (sum(Proteins) > 0) {
+      100 * Proteins / sum(Proteins)
+    } else {
+      NA_real_
+    }
+  ) |>
+  dplyr::ungroup() |>
+  dplyr::mutate(
+    Direction = factor(
+      Direction,
+      levels = c(
+        "Positive change",
+        "Negative change",
+        "Not significant"
+      )
+    )
+  )
+
+p_consensus_change_68 <- ggplot2::ggplot(
+  consensus_plot_data_68,
+  ggplot2::aes(
+    x = Software,
+    y = Percent,
+    fill = Direction
+  )
+) +
+  ggplot2::geom_col(
+    width = 0.7,
+    color = "white",
+    linewidth = 0.3
+  ) +
+  guides(fill = guide_legend(nrow = 1, byrow = TRUE)) +
+  ggplot2::geom_text(
+    data = consensus_plot_data_68,
+    ggplot2::aes(
+      x = Software,
+      y = Percent,
+      label = ifelse(
+        Proteins > 0,
+        sprintf("%.0f%%", Percent),""),
+      group = Direction),
+    position = ggplot2::position_stack(vjust = 0.5),
+    inherit.aes = FALSE,
+    color = "black",
+    size = 4.5,
+    fontface = "bold"
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c(
+      "Positive change" = "coral",
+      "Negative change" = "skyblue",
+      "Not significant" = "#D9D9D9"
+    )
+  ) +
+  ggplot2::scale_y_continuous(
+    breaks = seq(0, 100, 20),
+    labels = function(x) paste0(x, "%"),
+    expand = ggplot2::expansion(mult = c(0, 0.02))
+  ) +
+  ggplot2::labs(
+    title = "Temporal interaction changes in consensus proteins",
+    x = NULL,
+    y = "Proportion of tested consensus proteins",
+    fill = NULL
+  ) +
+  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    axis.text.x = ggplot2::element_text(face = "bold"),
+    legend.position = "bottom",
+    panel.grid.minor = ggplot2::element_blank()
+  )
+
+print(p_consensus_change_68)
+
+ggplot2::ggsave(
+    paste0("Outputs/p_consensus_change_68.pdf"),
+    plot = p_consensus_change_68,
+    device = grDevices::cairo_pdf,
+    width = 6,
+    height = 5,
+    bg = "white")
+
+saveRDS(p_consensus_change_68, paste0("Outputs/p_consensus_change_68.rds"))
 ```
 The results suggest that genotype-dependent differences in the cisplatin response are predominantly associated with the 6h timepoint, although agreement between pipelines varies substantially.
 
@@ -11106,13 +11524,12 @@ Across the four pipelines, the joint genotype-interaction test identified 2,209 
 
 ### Within-condition quantitative reproducibility
 ```{r within-condition-reproducibility}
-# Reuse existing QFeatures objects
-qf_models <- list(
-  AlphaDIA = qf_alpha,
-  `DIA-NN` = qf_diann,
-  Spectronaut = qf_spectro,
-  MaxDIA = qf_maxdia
-)
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+qf_models_83 <- readRDS(paste0(cache_dir, "/qf_models_83runs.rds"))
+qf_models <- qf_models_83$qf_models
+
 
 # Extract within-condition, within-batch protein variability
 reproducibility_results <- lapply(names(qf_models), function(software) {
