@@ -1,0 +1,45 @@
+"Contrast","Software","Tested_Proteins","Significant_Proteins"
+"KO vs CTRL baseline","AlphaDIA",11318,2803
+"KO vs CTRL baseline","DIA-NN",9812,3039
+"KO vs CTRL baseline","Spectronaut",7970,1843
+"KO vs CTRL baseline","MaxDIA",8481,367
+"KO vs CTRL cisplatin 6h","AlphaDIA",11131,2355
+"KO vs CTRL cisplatin 6h","DIA-NN",9550,2006
+"KO vs CTRL cisplatin 6h","Spectronaut",7966,1089
+"KO vs CTRL cisplatin 6h","MaxDIA",8478,63
+"KO vs CTRL cisplatin 24h","AlphaDIA",11315,3447
+"KO vs CTRL cisplatin 24h","DIA-NN",9793,2322
+"KO vs CTRL cisplatin 24h","Spectronaut",7969,1364
+"KO vs CTRL cisplatin 24h","MaxDIA",8480,337
+"CTRL cisplatin 6h vs baseline","AlphaDIA",11206,638
+"CTRL cisplatin 6h vs baseline","DIA-NN",9660,653
+"CTRL cisplatin 6h vs baseline","Spectronaut",7968,265
+"CTRL cisplatin 6h vs baseline","MaxDIA",8479,2
+"CTRL cisplatin 24h vs baseline","AlphaDIA",11318,1675
+"CTRL cisplatin 24h vs baseline","DIA-NN",9808,2230
+"CTRL cisplatin 24h vs baseline","Spectronaut",7969,1063
+"CTRL cisplatin 24h vs baseline","MaxDIA",8480,105
+"KO cisplatin 6h vs baseline","AlphaDIA",11176,4022
+"KO cisplatin 6h vs baseline","DIA-NN",9613,1845
+"KO cisplatin 6h vs baseline","Spectronaut",7967,971
+"KO cisplatin 6h vs baseline","MaxDIA",8478,183
+"KO cisplatin 24h vs baseline","AlphaDIA",11316,1596
+"KO cisplatin 24h vs baseline","DIA-NN",9793,2525
+"KO cisplatin 24h vs baseline","Spectronaut",7970,1443
+"KO cisplatin 24h vs baseline","MaxDIA",8480,145
+"JNK inhibitor effect at 6h","AlphaDIA",11148,1743
+"JNK inhibitor effect at 6h","DIA-NN",9544,2051
+"JNK inhibitor effect at 6h","Spectronaut",7964,956
+"JNK inhibitor effect at 6h","MaxDIA",8477,89
+"JNK inhibitor effect at 24h","AlphaDIA",11311,4179
+"JNK inhibitor effect at 24h","DIA-NN",9798,4180
+"JNK inhibitor effect at 24h","Spectronaut",7969,2944
+"JNK inhibitor effect at 24h","MaxDIA",8480,893
+"CTRL cisplatin 24h vs 6h","AlphaDIA",11203,735
+"CTRL cisplatin 24h vs 6h","DIA-NN",9652,970
+"CTRL cisplatin 24h vs 6h","Spectronaut",7968,427
+"CTRL cisplatin 24h vs 6h","MaxDIA",8477,9
+"KO cisplatin 24h vs 6h","AlphaDIA",11174,4039
+"KO cisplatin 24h vs 6h","DIA-NN",9601,2210
+"KO cisplatin 24h vs 6h","Spectronaut",7967,1269
+"KO cisplatin 24h vs 6h","MaxDIA",8477,194
