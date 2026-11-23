@@ -61,7 +61,8 @@ packages <- c(
   "readr",
   "knitr",
   "rmarkdown",
-  "bipartite"
+  "bipartite",
+  "ggalluvial"
 )
 
 # ------------------------------------------------------------
@@ -1144,6 +1145,156 @@ print(tibble::as_tibble(combined_summary), width = Inf)
 
 #print(as.tibble(make_sample_annotation(qf$runCol)), width = Inf)
 
+
+
+```
+
+### - Sample distribution
+
+```{r sample_distribution}
+combined_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_combined.rds")),
+  software_names
+)
+rm(list = setdiff(ls(), c("cache_dir", "software_names", "combined_qf_files")))
+invisible(gc(verbose = FALSE))
+
+qf <- readRDS(combined_qf_files[[1]])
+
+cd <- as.data.frame(
+  SummarizedExperiment::colData(qf)
+) %>%
+  mutate(
+    Batch = dplyr::case_when(
+    grepl("^Group1_", runCol) ~ "Group 1",
+    grepl("^Group2_", runCol) ~ "Group 2",
+    grepl("^Group3_", runCol) ~ "Group 3",
+    grepl("^Group4_", runCol) ~ "Group 4",
+    grepl("^20260331_", runCol) ~ "20260331",
+    TRUE ~ "Unknown"
+  )
+)
+
+rm(qf); gc(verbose = FALSE)
+
+sample_summary <- cd |>
+  dplyr::mutate(
+    dplyr::across(
+      c(genotype, treatment, time, Batch),
+      as.character
+    ),
+    dplyr::across(
+      c(genotype, treatment, time, Batch),
+      ~ tidyr::replace_na(.x, "Unknown")
+    )
+  ) |>
+  dplyr::count(
+    genotype, treatment, time, Batch,
+    name = "N"
+  )
+
+sample_lodes <- ggalluvial::to_lodes_form(
+  sample_summary |>
+    dplyr::select(genotype, treatment, time, Batch, N),
+  axes = 1:4,
+  key = "Axis",
+  value = "Stratum",
+  id = "FlowID"
+)
+
+sample_lodes$Axis <- factor(
+  sample_lodes$Axis,
+  levels = c("Batch", "time", "treatment", "genotype"),
+  labels = c("Batch", "Time", "Treatment", "Genotype")
+)
+
+flow_colors <- c(
+  # Genotype
+  CTRL = "#56B4E9",
+  KO = "#E76F51",
+  
+  # Treatment
+  cDDP = "#9999FF",
+  JNK_IN_8_cDDP = "#CC33CC",
+  Untreated = "#99FF99",
+  
+  # Time
+  Baseline = "#CCC000",
+  `6h` = "#E69F00",
+  `24h` = "#FFCC33",
+  
+  # Missing values, if any
+  Unknown = "gray"
+)
+
+p_sankey_source <- ggplot(
+  sample_lodes,
+  aes(
+    x = Axis,
+    stratum = Stratum,
+    alluvium = FlowID,
+    y = N
+  )
+) +
+  ggalluvial::geom_flow(
+    aes(fill = Stratum),
+    stat = "alluvium",
+    aes.flow = "backward",
+    width = 0.18,
+    alpha = 0.8,
+    colour = "transparent",
+    show.legend = F
+  ) +
+  ggalluvial::geom_stratum(
+    aes(fill = after_stat(stratum)),
+    width = 0.18,
+    color = "black",
+    linewidth = 0.35,
+    alpha = 1,
+    show.legend = FALSE
+  ) + 
+  geom_text(
+    stat = "stratum",
+    aes(label = paste0(after_stat(stratum), "\n(n=", after_stat(count), ")")),
+    size = 5, fontface = 'bold'
+  ) +
+  scale_fill_manual(
+    values = flow_colors,
+    na.value = "grey88",
+    name = "Source category"
+  ) +
+  scale_x_discrete(
+    expand = expansion(add = 0.28)
+  ) +
+  labs(
+    title = "Sample composition across experimental factors",
+    x = NULL,
+    y = "Number of samples"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 19),
+    axis.text = element_text(face = "bold", size = 15),
+    axis.title = element_text(face = "bold", size = 17),
+    panel.grid = element_blank()
+  ) +
+  guides(
+    fill = guide_legend(nrow = 2, byrow = TRUE)
+  ) +
+  coord_flip()
+
+
+print(p_sankey_source)
+
+ggsave("Outputs/p_sankey_source.pdf",
+  plot = p_sankey_source,
+  width = 11,
+  height = 11.5,
+  dpi = 300,
+  bg = "white"
+)
+
+saveRDS(p_sankey_source, "Outputs/p_sankey_source.rds")
 ```
 
 
@@ -8276,7 +8427,7 @@ saveRDS(qf_models_68,
 ```
 Following exclusion of Group 4, robust batch-adjusted protein-level models were fitted across 68 runs using all four DIA analysis pipelines. Model entries were generated for all 11,331 AlphaDIA, 9,833 DIA-NN, 7,970 Spectronaut, and 8,482 MaxDIA protein features. Valid coefficient estimates were obtained for 97.3%, 95.8%, 99.9%, and 99.9% of proteins, respectively. Median residual degrees of freedom ranged from 52.78 to 52.89 across pipelines. These results indicate that the revised experimental design supports robust protein-level modeling for the large majority of quantified proteins, while a small subset remains unsuitable for complete coefficient-based inference.
 
-
+# - - - - - - - - - - 
 ## 27. Hypothesis test
 ```{r construct_planned_contrasts}
 # ============================================================
@@ -9148,8 +9299,8 @@ p_scatter_agreement_6h_68 <- ggplot2::ggplot(
     ggplot2::geom_label(
         data = logfc_pairwise_summary_68,
         ggplot2::aes(
-            x = -axis_limit_68 * 0.96,
-            y = axis_limit_68 * 0.96,
+            x = -4.4173 * 0.96, # **** 4.4173 is from axis_limit_68 ****
+            y = 4.4173 * 0.96,
             label = Label),
         inherit.aes = FALSE, hjust = 0, vjust = 1, size = 3.2,
         lineheight = 1.15, label.size = 0, label.padding = grid::unit(0.18, "lines"),
@@ -11522,14 +11673,15 @@ The results suggest that genotype-dependent differences in the cisplatin respons
 
 Across the four pipelines, the joint genotype-interaction test identified 2,209 significant proteins in AlphaDIA, 905 in DIA-NN, 497 in Spectronaut, and 19 in MaxDIA (BH FDR < 0.05). Among 7,460 proteins tested by all four pipelines, only 16 were significant in all four, indicating limited consensus in statistical detection. However, these 16 proteins showed strong agreement in their 6h interaction effect sizes (Pearson r = 0.926–0.993), with consistent effect directions across all pipelines. In contrast, 24h effect-size correlations were weaker (r = −0.182–0.616), and none of the 16 proteins showed an individually significant 24h interaction. Together, these findings support a reproducible early genotype-dependent cisplatin response among a small consensus protein set.
 
-### Within-condition quantitative reproducibility
+## 29. Within-condition quantitative reproducibility
+
 ```{r within-condition-reproducibility}
 rm(list = setdiff(ls(), c("cache_dir", "software_names")))
 invisible(gc(verbose = FALSE))
 
 qf_models_83 <- readRDS(paste0(cache_dir, "/qf_models_83runs.rds"))
 qf_models <- qf_models_83$qf_models
-
+design_data <- qf_models_83$design_data
 
 # Extract within-condition, within-batch protein variability
 reproducibility_results <- lapply(names(qf_models), function(software) {
@@ -11597,6 +11749,13 @@ reproducibility_summary <- reproducibility_results |>
 
 print(reproducibility_summary, n = Inf)
 
+software_colors <- c(
+  AlphaDIA = "#0072B2",
+  `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA = "#CC79A7"
+)
+
 # Compare distributions across pipelines
 p_reproducibility <- reproducibility_results |>
   filter(is.finite(SD_log2)) |>
@@ -11636,15 +11795,21 @@ print(p_reproducibility)
 
 Within-condition quantitative variability was evaluated using the standard deviation (SD) of log2-transformed protein abundances among biological replicates belonging to the same experimental condition and acquisition batch. DIA-NN exhibited the lowest median within-group SD (0.109), closely followed by AlphaDIA (0.118), whereas Spectronaut showed moderately higher variability (0.145). MaxDIA exhibited the highest median SD (0.261), approximately 2.4-fold greater than DIA-NN. The interquartile ranges followed a similar pattern, with DIA-NN (0.058–0.204) and AlphaDIA (0.064–0.213) displaying narrower variability distributions than Spectronaut (0.075–0.288) and MaxDIA (0.145–0.460). These findings indicate that DIA-NN and AlphaDIA provided the most consistent protein abundance estimates among biological replicates, while MaxDIA showed substantially greater within-condition variability. This observation is consistent with the higher residual variability and lower differential abundance sensitivity previously observed for MaxDIA. However, because the analysis included biological rather than technical replicates and was performed on each pipeline's quantified protein set, these results reflect combined biological and technical variability rather than isolated technical reproducibility.
 
-### 68 Within-condition quantitative reproducibility
+### - 68 Within-condition quantitative reproducibility
 ```{r within_condition_reproducibility_68, message=FALSE, warning=FALSE, eval=run_analysis}
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+qf_models_68 <- readRDS(paste0(cache_dir, "/qf_models_68runs.rds"))
+qf_models <- qf_models_68$qf_models
+design_data_68 <- qf_models_68$design_data
 
 software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
 
 # Extract within-condition, within-batch protein variability
 reproducibility_results_68 <- lapply(software_order_68, function(sw) {
 
-  se <- qf_models_68[[sw]][["proteins"]]
+  se <- qf_models[[sw]][["proteins"]]
   abund <- SummarizedExperiment::assay(se)
 
   metadata <- design_data_68[
@@ -11711,6 +11876,13 @@ reproducibility_summary_68 <- reproducibility_results_68 |>
 
 print(reproducibility_summary_68, n = Inf)
 
+software_colors <- c(
+  AlphaDIA = "#0072B2",
+  `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA = "#CC79A7"
+)
+
 # Plot within-group variability
 p_reproducibility_68 <- reproducibility_results_68 |>
   dplyr::filter(is.finite(SD_log2)) |>
@@ -11754,9 +11926,14 @@ print(p_reproducibility_68)
 Within-condition quantitative variability was assessed using the standard deviation (SD) of log2-transformed protein abundances among biological replicates within the same experimental condition and acquisition batch. DIA-NN exhibited the lowest median SD (0.108), closely followed by AlphaDIA (0.115), whereas Spectronaut showed moderately higher variability (0.144). MaxDIA exhibited the highest median SD (0.266), approximately 2.5-fold greater than DIA-NN. Interquartile ranges showed a similar pattern, with DIA-NN (0.057–0.204) and AlphaDIA (0.062–0.208) displaying narrower variability distributions than Spectronaut (0.074–0.289) and MaxDIA (0.146–0.474). These findings indicate greater within-condition quantitative consistency for DIA-NN and AlphaDIA, whereas MaxDIA showed substantially higher variability. Because the analysis used biological replicates and pipeline-specific protein sets, these estimates reflect combined biological and technical variability rather than isolated technical reproducibility.
 Excluding Group 4 did not materially alter the relative reproducibility ranking: DIA-NN ≈ AlphaDIA < Spectronaut < MaxDIA in median within-condition variability.
 
-### Dynamic range and abundance-dependent precision
+## 30. Dynamic range and abundance-dependent precision
 
 ```{r abundance-dependent-precision, eval=FALSE}
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+qf_models_83 <- readRDS(paste0(cache_dir, "/qf_models_83runs.rds"))
+qf_models <- qf_models_83$qf_models
 # Restrict to proteins shared by all four pipelines
 shared_proteins_precision <- Reduce(
   intersect,
@@ -11815,6 +11992,9 @@ abundance_precision_summary <- abundance_precision |>
     Q1 = quantile(Residual_SD, 0.25),
     Q3 = quantile(Residual_SD, 0.75),
     .groups = "drop"
+  )%>%
+  mutate(
+    Software = factor(Software, names(software_colors))
   )
 
 print(abundance_precision_summary, n = Inf)
@@ -11834,6 +12014,13 @@ abundance_precision_extremes <- abundance_precision_summary |>
 
 print(abundance_precision_extremes)
 
+software_colors <- c(
+  AlphaDIA = "#0072B2",
+  `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA = "#CC79A7"
+)
+
 # Plot abundance-dependent residual variability
 p_abundance_precision <- ggplot(
   abundance_precision_summary,
@@ -11844,9 +12031,19 @@ p_abundance_precision <- ggplot(
     group = Software
   )
 ) +
+  geom_ribbon(
+    aes(
+      ymin = Q1,
+      ymax = Q3,
+      fill = Software
+    ),
+    alpha = 0.12,
+    color = NA
+  ) +
   geom_line(linewidth = 1) +
-  geom_point(size = 2) +
+  geom_point(size = 1.8) +
   scale_color_manual(values = software_colors) +
+  scale_fill_manual(values = software_colors, guide = "none") +
   scale_x_continuous(breaks = 1:10) +
   labs(
     title = "Abundance-dependent protein quantification precision",
@@ -11855,130 +12052,44 @@ p_abundance_precision <- ggplot(
       "shared proteins; abundance deciles defined within each pipeline"
     ),
     x = "Protein abundance decile (low to high)",
-    y = "Median model residual SD (log2 scale)",
+    y = "Median model residual SD \n(log2 scale)",
     color = "DIA pipeline"
   ) +
   theme_bw(base_size = 12)
 
+
 print(p_abundance_precision)
+
 ```
 
 Abundance-dependent precision was evaluated across 7,483 proteins shared by all four DIA pipelines by examining fitted residual standard deviations across ten within-pipeline protein abundance deciles. All pipelines generally exhibited decreasing residual variability with increasing protein abundance, although the magnitude of this relationship differed considerably. AlphaDIA and DIA-NN demonstrated consistently low residual SDs across most abundance deciles, decreasing from 0.218 and 0.226 in the lowest decile to 0.138 and 0.120 in the highest decile, respectively. MaxDIA exhibited substantially higher residual variability throughout the abundance range, with median SDs decreasing from 0.435 to 0.296, indicating that its reduced quantitative precision was not restricted to low-abundance proteins. Spectronaut displayed the strongest abundance dependence, with residual SD decreasing from 0.628 in the lowest decile to 0.147 in the highest decile, representing a 4.27-fold difference. Although Spectronaut showed particularly high variability among low-abundance proteins, its precision approached that of AlphaDIA and DIA-NN at higher abundance levels. Overall, these findings indicate that DIA-NN and AlphaDIA maintained comparatively stable quantitative precision across the abundance range, whereas MaxDIA exhibited consistently elevated residual variability and Spectronaut was particularly affected at low abundance.
 
 The pronounced abundance-dependent variability observed for Spectronaut is consistent with the unusual low-intensity distribution identified during initial data quality assessment, when intensity values of exactly 1 were detected and subsequently treated as missing values. Despite this preprocessing correction, Spectronaut retained substantially elevated residual variability among low-abundance proteins, whereas its precision approached that of AlphaDIA and DIA-NN at higher abundance levels. This suggests that low-abundance quantification represents a particular limitation in the processed Spectronaut dataset, although the present analysis cannot establish whether the original intensity-value artifact directly contributed to the remaining variability.
 
-```{r save_temporal_precision_results, eval=TRUE, message=FALSE}
-# ============================================================
-# SAVE TEMPORAL RESULTS AND MODEL-DEPENDENT SUMMARIES
-# No model fitting or hypothesis testing is performed here.
-# ============================================================
 
-# 1. Create a separate results directory
-results_cache_dir <- file.path(cache_dir, "statistical_results")
-dir.create(results_cache_dir, recursive = TRUE, showWarnings = FALSE)
-
-# 2. Explicitly named results we want to preserve
-priority_objects <- c(
-  "temporal_joint_summary",
-  "temporal_joint_results",
-  "temporal_interaction_summary",
-  "temporal_interaction_results",
-  "temporal_interaction_agreement",
-  "temporal_interaction_effect_agreement",
-  "temporal_interaction_time_specific",
-  "abundance_precision_summary",
-  "abundance_dependent_precision",
-  "within_condition_variability"
-)
-
-# 3. Find additional relevant objects in the current environment
-all_objects <- ls(envir = .GlobalEnv, all.names = TRUE)
-
-additional_objects <- grep(
-  "temporal|interaction|precision|residual|msqrob|joint|within_condition",
-  all_objects,
-  value = TRUE,
-  ignore.case = TRUE
-)
-
-objects_to_save <- unique(c(priority_objects, additional_objects))
-objects_to_save <- intersect(objects_to_save, all_objects)
-
-# 4. Save each available object separately
-saved <- character()
-failed <- character()
-
-for (nm in objects_to_save) {
-
-  obj <- get(nm, envir = .GlobalEnv, inherits = FALSE)
-
-  # Avoid saving functions, environments, and connections
-  if (is.function(obj) || is.environment(obj) ||
-      inherits(obj, "connection")) {
-    next
-  }
-
-  destination <- file.path(
-    results_cache_dir,
-    paste0(nm, ".rds")
-  )
-
-  tryCatch(
-    {
-      saveRDS(obj, destination, compress = TRUE)
-      saved <- c(saved, nm)
-      message("Saved: ", nm)
-    },
-    error = function(e) {
-      failed <<- c(failed, nm)
-      warning("Could not save ", nm, ": ", conditionMessage(e))
-    }
-  )
-}
-
-# 5. Save a manifest
-manifest <- data.frame(
-  object_name = saved,
-  file_name = paste0(saved, ".rds"),
-  stringsAsFactors = FALSE
-)
-
-saveRDS(
-  manifest,
-  file.path(results_cache_dir, "saved_results_manifest.rds")
-)
-
-# 6. Report what was saved
-cat("\n====================================\n")
-cat("STATISTICAL RESULTS CACHE\n")
-cat("====================================\n")
-cat("Directory:", results_cache_dir, "\n")
-cat("Objects saved:", length(saved), "\n")
-
-if (length(saved) > 0) {
-  print(manifest, row.names = FALSE)
-} else {
-  cat("No matching objects found in the current environment.\n")
-}
-
-if (length(failed) > 0) {
-  cat("\nObjects that failed to save:\n")
-  print(failed)
-}
-```
-
-### 68 Dynamic range and abundance-dependent precision
+### - 68 Dynamic range and abundance-dependent precision
 ```{r abundance_precision_and_save_68, eval=run_analysis, message=FALSE, warning=FALSE}
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+invisible(gc(verbose = FALSE))
+
+qf_models_68 <- readRDS(paste0(cache_dir, "/qf_models_68runs.rds"))
+qf_models <- qf_models_68$qf_models
 
 # ============================================================
 # 1. Abundance-dependent precision: 68 retained runs
 # ============================================================
+software_colors <- c(
+  AlphaDIA = "#0072B2",
+  `DIA-NN` = "#E69F00",
+  Spectronaut = "#009E73",
+  MaxDIA = "#CC79A7"
+)
 
 software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
 
 shared_proteins_precision_68 <- Reduce(
   intersect,
-  lapply(qf_models_68[software_order_68], function(qf) {
+  lapply(qf_models[software_order_68], function(qf) {
     rownames(qf[["proteins"]])
   })
 )
@@ -11986,7 +12097,7 @@ shared_proteins_precision_68 <- Reduce(
 abundance_precision_68 <- dplyr::bind_rows(
   lapply(software_order_68, function(sw) {
 
-    se <- qf_models_68[[sw]][["proteins"]]
+    se <- qf_models[[sw]][["proteins"]]
     idx <- match(shared_proteins_precision_68, rownames(se))
 
     abundance <- SummarizedExperiment::assay(se)[idx, , drop = FALSE]
@@ -12038,7 +12149,8 @@ abundance_precision_summary_68 <- abundance_precision_68 |>
     Q1 = unname(quantile(Residual_SD, 0.25)),
     Q3 = unname(quantile(Residual_SD, 0.75)),
     .groups = "drop"
-  )
+  )%>%
+  mutate(Software = factor(Software, levels = software_order_68))
 
 print(abundance_precision_summary_68, n = Inf)
 
@@ -12062,233 +12174,82 @@ print(abundance_precision_extremes_68)
 # 3. Plot abundance-dependent precision
 # ============================================================
 
-p_abundance_precision_68 <- ggplot2::ggplot(
+p_abundance_precision_68 <- ggplot(
   abundance_precision_summary_68,
-  ggplot2::aes(
+  aes(
     x = Abundance_decile,
     y = Median_residual_SD,
     color = Software,
     group = Software
   )
 ) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::geom_point(size = 2) +
-  ggplot2::scale_color_manual(values = software_colors) +
-  ggplot2::scale_x_continuous(breaks = 1:10) +
-  ggplot2::labs(
-    title = "Abundance-dependent protein quantification precision",
-    subtitle = paste(
-      length(shared_proteins_precision_68),
-      "shared proteins; abundance deciles defined within each pipeline"
+  geom_ribbon(
+    aes(
+      ymin = Q1,
+      ymax = Q3,
+      fill = Software
     ),
+    alpha = 0.12,
+    color = NA
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.8) +
+  scale_color_manual(values = software_colors) +
+  scale_fill_manual(values = software_colors, guide = "none") +
+  scale_x_continuous(breaks = 1:10) +
+  labs(
+#    title = "Abundance-dependent protein quantification precision",
+#    subtitle = paste(
+#      length(shared_proteins_precision),
+#      "shared proteins; abundance deciles defined within each pipeline"
+#    ),
     x = "Protein abundance decile (low to high)",
-    y = "Median model residual SD\n(log2 scale)",
+    y = "Median model residual SD \n(log2 scale)",
     color = "DIA pipeline"
   ) +
-  ggplot2::theme_bw(base_size = 12)
+  theme_bw(base_size = 12)
 
 print(p_abundance_precision_68)
 
-# ============================================================
-# 4. Save 68-run statistical results
-# ============================================================
+ggplot2::ggsave(
+    paste0("Outputs/p_abundance_precision_68.pdf"),
+    plot = p_abundance_precision_68,
+    device = grDevices::cairo_pdf,
+    width = 7,
+    height = 4,
+    bg = "white")
 
-results_cache_dir_68 <- file.path(
-  cache_dir, "statistical_results_68"
-)
-
-dir.create(
-  results_cache_dir_68,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-# Explicitly save important 68-run analysis results
-priority_objects_68 <- c(
-  "da_results_68",
-  "da_summary_68",
-  "temporal_joint_summary_68",
-  "temporal_joint_results_68",
-  "interaction_shared_summary_68",
-  "interaction_overlap_summary_68",
-  "interaction_consensus_68",
-  "interaction_effects_68",
-  "interaction_direction_summary_68",
-  "interaction_correlations_68",
-  "interaction_time_summary_68",
-  "interaction_time_pattern_summary_68",
-  "reproducibility_summary_68",
-  "reproducibility_results_68",
-  "abundance_precision_summary_68",
-  "abundance_precision_extremes_68",
-  "abundance_precision_68"
-)
-
-# Include other statistical summaries, but exclude large fitted models,
-# plots, functions and intermediate QFeatures objects
-additional_objects_68 <- grep(
-  "(temporal|interaction|precision|reproducibility|agreement|sigma|residual).*_68$",
-  ls(envir = .GlobalEnv),
-  value = TRUE,
-  ignore.case = TRUE
-)
-
-objects_to_save_68 <- unique(c(
-  priority_objects_68,
-  additional_objects_68
-))
-
-objects_to_save_68 <- intersect(
-  objects_to_save_68,
-  ls(envir = .GlobalEnv)
-)
-
-objects_to_save_68 <- setdiff(
-  objects_to_save_68,
-  c(
-    "qf_models_68",
-    "proteins_68",
-    "abundance_precision_68",
-    "reproducibility_results_68"
-  )
-)
-
-saved_68 <- character()
-failed_68 <- character()
-
-for (nm in objects_to_save_68) {
-
-  obj <- get(nm, envir = .GlobalEnv, inherits = FALSE)
-
-  if (
-    is.function(obj) ||
-    is.environment(obj) ||
-    inherits(obj, "connection") ||
-    inherits(obj, "QFeatures") ||
-    inherits(obj, "SummarizedExperiment") ||
-    inherits(obj, "ggplot") ||
-    inherits(obj, "patchwork")
-  ) {
-    rm(obj)
-    next
-  }
-
-  destination <- file.path(
-    results_cache_dir_68,
-    paste0(nm, ".rds")
-  )
-
-  tryCatch(
-    {
-      saveRDS(obj, destination, compress = TRUE)
-      saved_68 <- c(saved_68, nm)
-    },
-    error = function(e) {
-      failed_68 <- c(failed_68, nm)
-      warning("Could not save ", nm, ": ", conditionMessage(e))
-    }
-  )
-
-  rm(obj)
-}
-
-manifest_68 <- data.frame(
-  object_name = saved_68,
-  file_name = paste0(saved_68, ".rds"),
-  stringsAsFactors = FALSE
-)
-
-saveRDS(
-  manifest_68,
-  file.path(
-    results_cache_dir_68,
-    "saved_results_manifest_68.rds"
-  )
-)
-
-cat(
-  "\n====================================\n",
-  "68-RUN STATISTICAL RESULTS CACHE\n",
-  "====================================\n",
-  "Directory:", results_cache_dir_68, "\n",
-  "Objects saved:", length(saved_68), "\n"
-)
-
-print(manifest_68, row.names = FALSE)
-
-if (length(failed_68) > 0L) {
-  cat("\nFailed objects:\n")
-  print(failed_68)
-}
-
-gc(verbose = FALSE)
-
+saveRDS(p_abundance_precision_68, paste0("Outputs/p_abundance_precision_68.rds"))
 ```
 Abundance-dependent precision was evaluated across 7,483 proteins shared by all four DIA pipelines using model residual standard deviations across ten within-pipeline abundance deciles. Following exclusion of Group 4, the overall precision patterns remained consistent with the original 83-run analysis. AlphaDIA and DIA-NN maintained comparatively low residual variability, with median SDs decreasing from 0.207 and 0.211 in the lowest abundance decile to 0.118 and 0.100 in the highest decile, respectively. MaxDIA exhibited consistently higher residual variability across the abundance range (0.437–0.298). Spectronaut showed the strongest abundance dependence, with residual SD decreasing from 0.617 to 0.130, representing a 4.73-fold difference. Its particularly elevated variability among low-abundance proteins persisted despite the earlier correction of intensity values equal to 1. Overall, exclusion of Group 4 did not materially alter the relative precision characteristics of the four pipelines, supporting the robustness of these pipeline-level observations to the sample exclusion.
 
-
+# - - - - - - - - - - 
 # Publication-ready multipanel figures
 
 ```{r manuscript_export_setup, eval=FALSE}
-library(ggplot2)
-library(patchwork)
+rm(list = setdiff(ls(), c("cache_dir")))
+invisible(gc(verbose = FALSE))
 
-manuscript_dir <- file.path(cache_dir, "manuscript_figures")
-plot_backup_dir <- file.path(cache_dir, "manuscript_plot_objects")
-results_dir <- file.path(cache_dir, "statistical_results")
+mainFigs_dir <- "Manuscript/Main_figures"
+#plot_backup_dir <- file.path(cache_dir, "manuscript_plot_objects")
+#results_dir <- file.path(cache_dir, "statistical_results")
 
-dir.create(manuscript_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(mainFigs_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(suppFigs_dir, recursive = TRUE, showWarnings = FALSE)
 
-get_plot <- function(nm) {
-  candidates <- c(
-    file.path(plot_backup_dir, paste0(nm, ".rds")),
-    file.path(results_dir, paste0(nm, ".rds"))
-  )
-
-  for (path in candidates) {
-    if (file.exists(path)) {
-      obj <- readRDS(path)
-      if (inherits(obj, "ggplot") || inherits(obj, "patchwork")) {
-        return(obj)
-      }
-    }
-  }
-
-  if (exists(nm, envir = .GlobalEnv, inherits = FALSE)) {
-    obj <- get(nm, envir = .GlobalEnv)
-    if (inherits(obj, "ggplot") || inherits(obj, "patchwork")) {
-      return(obj)
-    }
-  }
-
-  stop("Plot not found: ", nm)
-}
 
 clean_panel <- function(p) {
   p + labs(title = NULL, subtitle = NULL, caption = NULL)
 }
 
 export_figure <- function(p, filename, width, height) {
-  saveRDS(p, file.path(manuscript_dir, paste0(filename, ".rds")))
+  #saveRDS(p, file.path(mainFigs_dir, paste0(filename, ".rds")))
 
   ggsave(
-    file.path(manuscript_dir, paste0(filename, ".pdf")),
+    file.path(mainFigs_dir, paste0(filename, ".pdf")),
     plot = p, width = width, height = height,
     units = "in", device = grDevices::cairo_pdf,
     bg = "white"
-  )
-
-  ggsave(
-    file.path(manuscript_dir, paste0(filename, ".tiff")),
-    plot = p, width = width, height = height,
-    units = "in", dpi = 600,
-    compression = "lzw", bg = "white"
-  )
-
-  ggsave(
-    file.path(manuscript_dir, paste0(filename, ".png")),
-    plot = p, width = width, height = height,
-    units = "in", dpi = 300, bg = "white"
   )
 
   message("Exported: ", filename)
@@ -12296,31 +12257,28 @@ export_figure <- function(p, filename, width, height) {
 ```
 
 ## Fig 2: Identification and coverage
+
 ```{r export_figure_2_identification, eval=FALSE}
-library(patchwork)
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
 
-p_upset_precursors <- p_upset_precursors_68
-p_upset_identification <- p_upset_identification_68
-p_precursor_coverage <- p_precursor_coverage_68
-
-p2a <- get_plot("p_precursor_coverage")
-p2b <- get_plot("p_upset_precursors")
-p2c <- get_plot("p_upset_identification")
-
+p2a <- readRDS("Outputs/p_upset_precursors_68.rds")
+p2b <- readRDS("Outputs/p_upset_identification_68.rds")
+p2c <- readRDS("Outputs/p_precursor_coverage_68.rds")
 
 
 fig2 <- (
   wrap_elements(full = p2a) /
   wrap_elements(full = p2b) /
-  wrap_elements(full = p2c)
-) +
+  wrap_elements(full = p2c)) +
   plot_layout(heights = c(1.5, 1.5, 1.5)) +
   plot_annotation(tag_levels = "A") &
   theme(
     plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(fig2, "Figure_2_Identification", 10, 9)
+export_figure(fig2, "Figure_2_Identification", 7, 13)
+
 print(fig2)
 ```
 **Figure 2. Precursor coverage and identification overlap across four DIA proteomics analysis pipelines.** (A) Distribution of unique peptide sequence–charge combinations per protein group identified by AlphaDIA, DIA-NN, Spectronaut, and MaxDIA. Boxplots show the median, interquartile range, and whiskers, with counts displayed on a logarithmic (log10) scale. (B) UpSet plot showing shared and pipeline-specific precursor identifications. Intersection bars indicate the number of unique peptide sequence–charge combinations identified by each pipeline combination, while horizontal bars represent the total number identified by each pipeline. Precursors were harmonized using stripped peptide sequence and charge state; modified forms sharing the same sequence and charge were collapsed into a single identifier. (C) UpSet plot showing shared and pipeline-specific protein-group identifications, using exact protein-group identifier matching. Intersection bars indicate the number of protein groups associated with each pipeline combination, and horizontal bars show the total number identified by each pipeline. Filled dots and connecting lines indicate the pipelines contributing to each intersection. All analyses were based on the same 83-sample dataset.
@@ -12329,10 +12287,6 @@ print(fig2)
 ## Fig 3: NIMAA completeness
 
 ```{r export_figure3_NIMAA_fixed, eval=FALSE, message=FALSE, fig.show='hide'}
-library(ggplot2)
-library(patchwork)
-library(cowplot)
-
 # ============================================================
 # FIGURE 3 — NIMAA COMPLETE SUBMATRICES
 #
@@ -12344,202 +12298,33 @@ library(cowplot)
 #
 # Uses existing plots — no NIMAA recalculation
 # ============================================================
-
-# 1. GET THE CORRECT PLOT OBJECTS ----------------------------
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
 
 # Use the newly separated object names
-protein <- get_plot("NIMAA_protein_figure")
-precursor <- get_plot("NIMAA_precursor_figure")
+protein <- readRDS("Outputs/NIMAA_protein.rds")
+precursor <- readRDS("Outputs/NIMAA_precursor.rds")
 
-stopifnot(
-  inherits(protein, "ggplot"),
-  inherits(precursor, "ggplot")
-)
-
-# Do not override fonts: both figures already have
-# manuscript-readable fonts and rotated x-axis labels.
-
-# 2. COMBINE THE TWO FOUR-PANEL ROWS -------------------------
-
-fig3 <- cowplot::plot_grid(
-  protein,
-  precursor,
-  ncol = 1,
-  rel_heights = c(1, 1),
-  align = "v"
-)
-
-# 3. OUTPUT DIRECTORY ---------------------------------------
-
-manuscript_dir <- file.path(
-  cache_dir,
-  "manuscript_figures"
-)
-
-dir.create(
-  manuscript_dir,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-# 4. SAVE EDITABLE FIGURE ------------------------------------
-
-saveRDS(
-  fig3,
-  file.path(
-    manuscript_dir,
-    "Figure_3_NIMAA_8Panels.rds"
+fig3 <- (
+  wrap_elements(full = protein) /
+  wrap_elements(full = precursor)) +
+  plot_layout(heights = c(1.5, 1.5)) +
+  theme(
+    plot.tag = element_text(size = 22, face = "bold")
   )
-)
 
-# 5. SAVE PNG — 1500 x 1200 PIXELS ---------------------------
+export_figure(fig3, "Figure_3_NIMAA_8Panels", 15, 13)
 
-ggsave(
-  filename = file.path(
-    manuscript_dir, "Figure_3_NIMAA_8Panels.png"
-  ),
-  plot = fig3,
-  width = 15,
-  height = 12,
-  units = "in",
-  dpi = 100,
-  bg = "white",
-  limitsize = FALSE
-)
+print(fig3)
 
-cat(
-  "Figure 3 saved successfully.\n",
-  "PNG: 1500 x 1200 pixels\n",
-  "PDF: 5 x 4 inches\n",
-  "Output folder: ", manuscript_dir, "\n"
-)
 ```
 **Figure 3. Comparison of complete protein- and precursor-level incidence submatrices across four DIA proteomics analysis pipelines.** Binary detection matrices for AlphaDIA, DIA-NN, Spectronaut, and MaxDIA are shown at the **protein level (top row)** and **precursor level (bottom row)** across 83 experimental runs. Rows and columns of the original incidence matrices were rearranged using the NIMAA framework to reveal patterns of detection completeness. Colored regions indicate observed identifications, whereas white regions represent missing identifications; colors distinguish the four analysis pipelines. Shaded rectangles outlined in dark gray indicate the largest complete submatrices identified using the *rectangular element-max* heuristic, with the corresponding numbers of retained proteins or precursors and runs reported above each panel. The x-axis represents arranged proteins or precursors, and the y-axis represents arranged experimental runs. For visualization, the precursor-level incidence matrices were aggregated into consecutive display bins, with each bin classified as observed when at least 50% of its entries were present. All reported submatrix dimensions and rectangle boundaries were calculated from the original, unaggregated incidence matrices. Differences in the size and shape of the complete submatrices illustrate pipeline-dependent trade-offs between identification depth and data completeness.
 
 
 ## Fig 4: NIMAA summary
 ```{r export_NIMAA_lollipop_nestedness, eval=FALSE, message=FALSE}
-library(ggplot2)
-library(patchwork)
-
-# Restore original figures, including their annotations
-pA <- get_plot("NIMAA_precursor_summary_figure")
-pB <- get_plot("NIMAA_protein_summary_figure")
-pC <- get_plot("NIMAA_nestedness_figure")
-
-# Move labels to two lines in panels A and B
-move_labels <- function(p, xpos) {
-  for (i in seq_along(p$layers)) {
-    if (inherits(p$layers[[i]]$geom, "GeomText")) {
-
-      layer <- p$layers[[i]]
-
-      # Convert existing labels into two lines
-      if (!is.null(layer$data) &&
-          "label" %in% names(layer$data)) {
-
-        layer$data$label <- sub(
-          " \\(",
-          "\n(",
-          layer$data$label
-        )
-      }
-
-      layer$aes_params$x <- xpos
-      layer$aes_params$hjust <- 0.5
-      layer$aes_params$vjust <- 0.5
-      layer$aes_params$size <- 4.2
-      layer$aes_params$lineheight <- 1.3
-
-      p$layers[[i]] <- layer
-    }
-  }
-  p
-}
-
-pA <- move_labels(pA, xpos = 20)
-pB <- move_labels(pB, xpos = 50)
-
-# Panel C: move mean ± SD labels farther right
-for (i in seq_along(pC$layers)) {
-
-  if (inherits(pC$layers[[i]]$geom, "GeomText")) {
-
-    pC$layers[[i]]$mapping$x <- quote(Mean + SD + 2.0)
-
-    pC$layers[[i]]$aes_params$hjust <- 0
-    pC$layers[[i]]$aes_params$vjust <- 0.5
-  }
-}
-
-pC <- pC +
-  coord_cartesian(xlim = c(0, 50)) +
-  scale_x_continuous(breaks = seq(0, 50, 10))
-pD <- pD + coord_cartesian(xlim = c(0, 2)) +
-  scale_x_continuous(breaks = seq(0, 1, 1.5))
-# Reduce x-axis ticks without changing data limits
-# A and B use percentages on a 0–100 scale
-pA <- pA + scale_x_continuous(
-  breaks = c(0, 20, 40),
-  labels = function(x) paste0(x, "%")
-)
-
-pB <- pB + scale_x_continuous(
-  breaks = c(0, 50, 100),
-  labels = function(x) paste0(x, "%")
-)
-
-# Protein nestedness: existing calculated results
-colors <- c(
-  "AlphaDIA" = "#0072B2", "DIA-NN" = "#E69F00",
-  "Spectronaut" = "#009E73", "MaxDIA" = "#CC79A7"
-)
-
-d <- NIMAA_protein_nestedness
-d$Software <- factor(d$Software, levels = rev(names(colors)))
-
-pD <- ggplot(
-  d,
-  aes(Nestedness_temperature, Software, colour = Software)
-) +
-  geom_segment(
-    aes(
-      x = 0,
-      xend = Nestedness_temperature,
-      yend = Software
-    ),
-    linewidth = 1
-  ) +
-  geom_point(size = 4) +
-  geom_text(
-    aes(label = sprintf("%.2f", Nestedness_temperature)),
-    hjust = -0.25,
-    size = 4.5,
-    colour = "black"
-  ) +
-  scale_colour_manual(values = colors) +
-  scale_x_continuous(
-    breaks = seq(0, 2, 0.5),
-    expand = expansion(mult = c(0, 0.05))
-  ) +
-  coord_cartesian(xlim = c(0, 2)) +
-  labs(
-    x = "Protein nestedness temperature",
-    y = NULL
-  ) +
-  theme_classic(base_size = 14) +
-  theme(
-    axis.line.x = element_line(colour = "black", linewidth = 0.7),
-    axis.line.y = element_line(colour = "black", linewidth = 0.7),
-    axis.ticks = element_line(colour = "black"),
-    axis.text.x = element_text(size = 14),
-    axis.text.y = element_text(size = 15, face = "bold"),
-    panel.grid.major.x = element_line(
-      colour = "grey90",
-      linewidth = 0.4
-    ),
-    legend.position = "none"
-  )
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
 
 # Consistent formatting
 fmt <- function(p) p +
@@ -12552,24 +12337,27 @@ fmt <- function(p) p +
     plot.margin = margin(10, 16, 10, 10)
   )
 
-# One-row layout, more width for annotated panels A and B
-fig_NIMAA_summary <- wrap_plots(
-  fmt(pA), fmt(pB), fmt(pC), fmt(pD),
-  ncol = 2,
-  widths = c(1.5, 1.5, 1.1, 1)
-) + plot_annotation(tag_levels = "A") &
-  theme(plot.tag = element_text(size = 24, face = "bold"))
 
-# Save PNG only
-manuscript_dir <- file.path(cache_dir, "manuscript_figures")
-dir.create(manuscript_dir, recursive = TRUE, showWarnings = FALSE)
+pA <- readRDS("Outputs/NIMAA_precursor_lollipop.rds")
+pB <- readRDS("Outputs/NIMAA_protein_lollipop.rds")
+pC <- readRDS("Outputs/NIMAA_precursor_nestedness.rds")
+pD <- readRDS("Outputs/NIMAA_protein_nestedness.rds")
 
-ggsave(
-  file.path(manuscript_dir, "Figure_4_NIMAA_Lollipop_Nestedness.png"),
-  fig_NIMAA_summary,
-  width = 11, height = 8, units = "in",
-  dpi = 200, bg = "white"
-)
+
+fig4 <- (
+  (wrap_elements(full = fmt(pA)) + wrap_elements(full = fmt(pB))) /
+  (wrap_elements(full = fmt(pC)) + wrap_elements(full = fmt(pD)))
+) +
+  plot_layout(heights = c(1, 1), widths = c(1, 1)) +
+  plot_annotation(tag_levels = "A") &
+  theme(
+    plot.tag = element_text(size = 22, face = "bold")
+  )
+
+print(fig4)
+
+export_figure(fig4, "Figure_4_NIMAA_Lollipop_Nestedness", 9, 6)
+
 ```
 
 **Figure 4. NIMAA-based assessment of quantitative matrix completeness and nestedness across four DIA proteomics analysis pipelines.** (A) Precursor-level retention of the original quantitative matrix within the largest complete (missing-value-free) submatrix identified by NIMAA. Labels indicate the percentage of the original matrix retained, the number of precursors and their proportion of the original precursor set, and the number of runs retained out of 83. (B) Protein-level retention within the largest complete submatrix. Labels indicate the percentage of the original protein matrix retained, the number of proteins, and the number of runs retained out of 83. (C) Precursor-level nestedness temperature, calculated across 20 repeated NIMAA evaluations per pipeline. Points represent individual evaluations, with annotations showing the mean ± standard deviation. (D) Protein-level nestedness temperature, calculated once per pipeline, with values indicated beside each point. Lower nestedness temperatures indicate more strongly nested missingness patterns. Colors consistently identify AlphaDIA (blue), DIA-NN (orange), Spectronaut (green), and MaxDIA (pink). All analyses were performed on the same 83-sample dataset.
@@ -12577,23 +12365,14 @@ ggsave(
 
 ## Fig 5: Reproducible and precision
 ```{r export_figure_4_precision, eval=FALSE}
-library(patchwork)
-
-p_mds_condition_68 <- p_mds_condition
-p_mds_batch_68 <- p_mds_batch
-
-mds_qc_68 <- mds_qc
-mds_summary_68 <- mds_summary
-
-correlation_summary_68 <- correlation_summary
-p_sigma_68 <- p_sigma
-p_abundance_precision_68 <- p_abundance_precision
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
 
 
-p5a <- clean_panel(get_plot("p_mds_condition"))
-p5b <- clean_panel(get_plot("p_mds_batch"))
-p5c <- clean_panel(get_plot("p_sigma"))
-p5d <- clean_panel(get_plot("p_abundance_precision"))
+p5a <- clean_panel(readRDS("Outputs/potein_mds_condition_68.rds"))
+p5b <- clean_panel(readRDS("Outputs/potein_mds_batch_68.rds"))
+p5c <- clean_panel(readRDS("Outputs/p_sigma_68.rds"))
+p5d <- clean_panel(readRDS("Outputs/p_abundance_precision_68.rds"))
 
 fig5 <- (p5a | p5b) / (p5c | p5d) +
   plot_annotation(tag_levels = "A")&
@@ -12612,25 +12391,46 @@ print(fig5)
 
 ## Fig 6: Differential abundance
 ```{r export_figure_6_da_68, eval=FALSE}
-library(ggplot2)
-library(patchwork)
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
 
 # Retrieve existing 68-run plots
-p6a <- get_plot("p_da_heatmap_68")
-p6b <- get_plot("p_da_upset_6h_68")
-p6c <- get_plot("p_abs_logfc_68")
-p6d <- get_plot("p_precision_68")
+p6a <- readRDS("Outputs/p_da_heatmap_68.rds")
+p6b <- readRDS("Outputs/p_da_upset_6h_68.rds")
+p6c <- readRDS("Outputs/p_abs_logfc_68.rds")
+p6dL <- readRDS("Outputs/p_precision_Contrast-specific standard error_6h_68.rds")
+p6dR <- readRDS("Outputs/p_precision_Absolute t-statistic_6h_68.rds")
 
 # Improve violin plot readability
 violin_theme <- theme(
-  axis.text.x = element_text(size = 12),
-  axis.text.y = element_text(size = 12),
+  axis.text = element_text(size = 12),
   axis.title = element_text(size = 14),
   strip.text = element_text(size = 13, face = "bold")
 )
 
-p6c <- p6c + violin_theme
-p6d <- p6d + violin_theme
+
+p6c <- p6c + violin_theme + coord_cartesian(ylim = c(0,1))
+
+p6dL <- p6dL +
+  violin_theme +
+  labs(subtitle = NULL) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+p6dR <- p6dR +
+  violin_theme +
+  labs(subtitle = NULL) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+p6d <- (p6dL + violin_theme + labs(subtitle = NULL)) | (p6dR + violin_theme + labs(subtitle = NULL))
+p6d <- (p6dL | p6dR) +
+  plot_annotation(
+    title = "Statistical uncertainty and test statistics across DIA pipelines",
+    subtitle = "KO vs CTRL cisplatin 6h | Shared protein groups",
+    theme = theme(
+      plot.title = element_text(size = 15, face = "bold", hjust = 0),
+      plot.subtitle = element_text(size = 12, hjust = 0)
+    )
+  )
 
 # Treat each plot, including the UpSet, as one tagged panel
 tag_panel <- function(p, letter) {
@@ -12638,7 +12438,7 @@ tag_panel <- function(p, letter) {
     labs(tag = letter) +
     theme(
       plot.tag = element_text(size = 22, face = "bold"),
-      plot.tag.position = c(0, 1),
+      plot.tag.position = c(-0.02, 1),
       plot.margin = margin(8, 8, 8, 8)
     )
 }
@@ -12647,16 +12447,14 @@ tag_panel <- function(p, letter) {
 top <- tag_panel(p6a, "A") | tag_panel(p6b, "B")
 bottom <- tag_panel(p6c, "C") | tag_panel(p6d, "D")
 
-fig6_68 <- (
-  wrap_elements(full = top) /
-  wrap_elements(full = bottom)
-) +
+fig6_68 <- (wrap_elements(full = top) /
+           wrap_elements(full = bottom)) +
   plot_layout(heights = c(1, 0.9))
 
 export_figure(
   fig6_68,
   "Figure_6_Differential_Abundance_68",
-  14, 8
+  16, 10
 )
 
 print(fig6_68)
@@ -12666,52 +12464,52 @@ print(fig6_68)
 ## Fig 7: Fold-change agreement
 
 ```{r export_figure_7_logfc_68, eval=FALSE, message=FALSE, warning=FALSE}
-library(ggplot2)
-library(patchwork)
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
 
-# Retrieve the 68-run fold-change agreement plot
-fig7 <- get_plot("p_logfc_agreement_6h_68") +
-  labs(
-    title = NULL,
-    caption = NULL
-  )
+fig7 <- readRDS("Outputs/p_heatmap_agreement_6h_68.rds")
 
 export_figure(
   fig7,
   "Figure_7_FoldChange_Agreement_68",
-  7, 7
-)
+  6, 4.5)
 
 print(fig7)
 ```
 **Figure 7. Pairwise agreement in protein log2 fold changes across four DIA proteomics analysis pipelines.** Scatterplots compare protein-level log2 fold-change estimates for KO versus CTRL after 6 h of cisplatin treatment across all six pairwise combinations of AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, based on the 68-run analysis. Each point represents a protein group with fold-change estimates available from both pipelines. The x- and y-axes represent the log2 fold changes estimated by the first and second pipelines named in each panel, respectively. Orange dashed lines indicate the line of identity (y = x), representing perfect agreement between pipelines. Points closer to this line indicate greater concordance in estimated fold-change magnitude and direction, whereas deviations reflect differences in quantitative effect-size estimates. Comparisons illustrate the consistency and variability of protein-level differential abundance estimates across DIA analysis pipelines.
 
+## Supp Fig Sx
+
+```{r}
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
+
+# Retrieve the 68-run fold-change agreement plot
+figSx <- readRDS("Outputs/p_scatter_agreement_6h_68.rds")
+
+
+export_figure(
+  figSx,
+  "Figure_Sx_FoldChange_Agreement_68",
+  8, 10)
+
+print(figSx)
+```
+
+
 ## Fig 8: Temporal interactions
 
 ```{r export_figure_8_temporal_68, eval=FALSE, message=FALSE, warning=FALSE}
-library(ggplot2)
-library(patchwork)
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
 
 # Retrieve existing 68-run plots
-p8a <- get_plot("p_interaction_agreement_68")
-p8b <- get_plot("p_interaction_time_patterns_68")
-p8c <- get_plot("p_interaction_effects_68")
-p8d <- get_plot("p_reproducibility_68")
+p8a <- readRDS("Outputs/p_interaction_agreement_68.rds")
+p8b <- readRDS("Outputs/p_interaction_time_patterns_68.rds")
+p8c <- readRDS("Outputs/p_interaction_effects_68.rds")
+p8d <- readRDS("Outputs/p_consensus_change_68.rds")
 
-# Panel A: Cross-pipeline agreement
-p8a <- p8a +
-  labs(
-    title = "Cross-pipeline interaction\nagreement",
-    subtitle = NULL,
-    x = "Pipelines detecting significant\ninteraction"
-  )
 
-# Panel B: Time-specific interactions
-p8b <- p8b +
-  labs(
-    title = "Time-specific interactions",
-    subtitle = NULL
-  )
 
 # Panel C: Genotype-interaction effect sizes
 p8c <- p8c +
@@ -12736,16 +12534,6 @@ p8d <- p8d +
     y = "Within-group SD of log2 protein\nabundance"
   )
 
-```{r export_figure_7_temporal, eval=FALSE}
-p8a <- p_interaction_agreement
-p8b <- p_interaction_time_patterns
-p8c <- get_plot("p_interaction_effects")
-
-p8a <- p8a + labs(
-  title = "Cross-pipeline interaction agreement",
-  subtitle = NULL,
-  x = "Pipelines detecting significant interaction"
-)
 
 # Assemble Figure 8
 fig8_68 <- (
@@ -12770,9 +12558,8 @@ print(fig8_68)
 
 ## Fig 9: JUN abundance across four DIA pipelines
 ```{r figure_9_export_data_68, message=FALSE, warning=FALSE}
-library(dplyr)
-library(tidyr)
-library(openxlsx)
+rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
+invisible(gc(verbose = FALSE))
 
 # ============================================================
 # Figure 9: Export all underlying numerical data
@@ -12956,6 +12743,7 @@ print(
 )
 ```
 
+#nnn
 ```{r figure_9_six_panel_layout_68, message=FALSE, warning=FALSE}
 library(ggplot2)
 library(dplyr)
