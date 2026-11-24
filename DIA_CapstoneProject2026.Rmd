@@ -155,72 +155,6 @@ software_names <- names(input_files)
 
 ```
 
-## - jun_data_68
-
-```{r restore_jun_data_68, message=FALSE}
-# Load the previously saved 68-run dataset
-# Restore the saved 68-run dataset
-jun_file_68 <- "/Users/nvd448/Documents/MSProt2026/R_cache/statistical_results/qf_models_68runs.rds"
-
-stopifnot(file.exists(jun_file_68))
-
-jun_cache_68 <- readRDS(jun_file_68)
-
-# Inspect the saved object structure before extracting data
-print(names(jun_cache_68))
-qf_models_68 <- jun_cache_68$qf_models
-sample_design_68 <- jun_cache_68$sample_design
-
-software_order_68 <- c(
-  "AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"
-)
-
-# Keep CTRL and KO at baseline, 6h and 24h.
-# Explicitly exclude JNK inhibitor samples.
-jun_conditions_68 <- c(
-  "CTRL_Untreated_Baseline",
-  "KO_Untreated_Baseline",
-  "CTRL_cDDP_6h",
-  "KO_cDDP_6h",
-  "CTRL_cDDP_24h",
-  "KO_cDDP_24h"
-)
-
-jun_sample_design_68 <- sample_design_68 |>
-  dplyr::filter(
-    as.character(Condition) %in% jun_conditions_68
-  )
-
-stopifnot(
-  nrow(sample_design_68) == 68,
-  all(jun_conditions_68 %in% as.character(sample_design_68$Condition)),
-  !any(grepl("JNK", jun_sample_design_68$Condition)),
-  all(software_order_68 %in% names(qf_models_68))
-)
-
-# Verify the six selected groups and their acquisition batches
-print(
-  jun_sample_design_68 |>
-    dplyr::count(Condition, Batch, name = "Runs")
-)
-
-# Confirm required assays are available
-print(
-  data.frame(
-    Software = software_order_68,
-    Protein_assay = vapply(
-      qf_models_68[software_order_68],
-      function(x) "proteins" %in% names(x),
-      logical(1)
-    ),
-    Precursor_assay = vapply(
-      qf_models_68[software_order_68],
-      function(x) "precursors_norm" %in% names(x),
-      logical(1)
-    )
-  )
-)
-```
 
 ## 2. Load & clean
 Import the software-specific outputs and standardize precursor identifiers, sample names, intensity columns, and metadata. Duplicate precursor–run records are resolved using intensity availability and identification scores, where applicable. Zero intensities are treated as missing values (NA), while nonzero intensities are preserved. Basic QC statistics, including precursor counts, duplicate records, and missing values, are reported for each software.
@@ -9304,12 +9238,12 @@ p_scatter_agreement_6h_68 <- ggplot2::ggplot(
             label = Label),
         inherit.aes = FALSE, hjust = 0, vjust = 1, size = 3.2,
         lineheight = 1.15, label.size = 0, label.padding = grid::unit(0.18, "lines"),
-        fill = "white", alpha = 0.88, color = "black") +
+        fill = "white", alpha = 0.88, color = "red") +
     
     ggplot2::facet_wrap(~Pair, ncol = 2) +
     ggplot2::coord_equal(
-        xlim = c(-axis_limit_68, axis_limit_68),
-        ylim = c(-axis_limit_68, axis_limit_68)) +
+        xlim = c(-4.4173, 4.4173),
+        ylim = c(-4.4173, 4.4173)) +
     
     ggplot2::labs(
         title = target_contrast_68,
@@ -9379,6 +9313,7 @@ pairwise_summary_68 <- pairwise_data_68 %>%
   )
 
 print(pairwise_summary_68)
+
 
 plot_df <- pairwise_summary_68 %>%
   mutate(
@@ -9495,6 +9430,139 @@ ggplot2::ggsave(
 )
 
 saveRDS(p_heatmap_agreement_6h_68, "Outputs/p_heatmap_agreement_6h_68.rds")
+
+
+# ---------------------------------
+plot_df2 <- plot_df %>%
+  mutate(
+    Pipeline1 = as.character(Pipeline1),
+    Pipeline2 = as.character(Pipeline2),
+    idx1 = match(Pipeline1, software_order_68),
+    idx2 = match(Pipeline2, software_order_68),
+    
+    # identify the "left/top" and "right/bottom" pipeline in matrix order
+    Pipe_low  = ifelse(idx1 < idx2, Pipeline1, Pipeline2),
+    Pipe_high = ifelse(idx1 < idx2, Pipeline2, Pipeline1)
+  )
+
+# Lower triangle = CCC
+ccc_matrix_df <- plot_df2 %>%
+  transmute(
+    Row = Pipe_high,     # row below diagonal
+    Col = Pipe_low,
+    Metric = "CCC",
+    Value = CCC,
+    Label = sprintf("%.2f\nn=%s", CCC, comma(n))
+  )
+
+# Upper triangle = MAE
+mae_matrix_df <- plot_df2 %>%
+  transmute(
+    Row = Pipe_low,      # row above diagonal
+    Col = Pipe_high,
+    Metric = "Mean |Δlog2FC|",
+    Value = MAE,
+    Label = sprintf("%.2f", MAE)
+  )
+
+# Diagonal cells
+diag_df <- data.frame(
+  Row = software_order_68,
+  Col = software_order_68
+)
+
+# Factor ordering for plotting
+ccc_matrix_df <- ccc_matrix_df %>%
+  mutate(
+    Row = factor(Row, levels = rev(software_order_68)),
+    Col = factor(Col, levels = software_order_68)
+  )
+
+mae_matrix_df <- mae_matrix_df %>%
+  mutate(
+    Row = factor(Row, levels = rev(software_order_68)),
+    Col = factor(Col, levels = software_order_68)
+  )
+
+diag_df <- diag_df %>%
+  mutate(
+    Row = factor(Row, levels = rev(software_order_68)),
+    Col = factor(Col, levels = software_order_68)
+  )
+
+# --------------------------------------------------
+# Matrix heatmap: upper triangle = MAE
+#                 lower triangle = CCC
+# --------------------------------------------------
+
+p_heatmap_matrix_6h_68 <- ggplot() +
+  
+  # blank diagonal
+  geom_tile(
+    data = diag_df,
+    aes(x = Col, y = Row),
+    fill = "grey88",
+    color = "white",
+    linewidth = 1.2
+  ) +
+  
+  # ---- Upper triangle: MAE ----
+geom_tile(
+  data = mae_matrix_df,
+  aes(x = Col, y = Row, fill = Value),
+  color = "white",
+  linewidth = 1.2) +
+  geom_text(
+    data = mae_matrix_df,
+    aes(x = Col, y = Row, label = Label),
+    size = 5
+  ) +
+  scale_fill_gradient(
+    low = "#F6E8DC",
+    high = "#D7301F",
+    name = "Mean |Δlog2FC|"
+  ) +
+  
+  ggnewscale::new_scale_fill() +
+  
+  # ---- Lower triangle: CCC ----
+geom_tile(
+  data = ccc_matrix_df,
+  aes(x = Col, y = Row, fill = Value),
+  color = "white",
+  linewidth = 1.2
+) +
+  geom_text(
+    data = ccc_matrix_df,
+    aes(x = Col, y = Row, label = Label),
+    size = 4.8,
+    lineheight = 1.0
+  ) +
+  scale_fill_gradient(low = "#F7FBFF", high = "#2166AC", limits = c(0, 1), name = "CCC") +
+  
+  coord_fixed() +
+  labs(
+    title = target_contrast_68, x = NULL, y = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 17, hjust = 0.5),
+    axis.text.x = element_text(face = "bold", size = 13),
+    axis.text.y = element_text(face = "bold", size = 13),
+    panel.grid = element_blank()
+  )
+
+print(p_heatmap_matrix_6h_68)
+
+ggplot2::ggsave(
+  "Outputs/p_heatmap_matrix_6h_68.pdf",
+  plot = p_heatmap_matrix_6h_68,
+  device = grDevices::cairo_pdf,
+  width = 7,
+  height = 5,
+  bg = "white"
+)
+
+saveRDS(p_heatmap_matrix_6h_68, "Outputs/p_heatmap_matrix_6h_68.rds")
 
 # ============================================================
 # 3. Absolute log2FC distributions
@@ -11386,12 +11454,9 @@ p_interaction_time_patterns_68 <-  ggplot2::ggplot(
     y = "Proportion of consensus proteins",
     fill = NULL
   ) +
-  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme_bw(base_size = 12) +
   guides(fill = guide_legend(nrow = 2, byrow = TRUE, title = NULL)) +
   ggplot2::theme(
-    plot.title = ggplot2::element_text(
-      face = "bold"
-    ),
     axis.text.x = ggplot2::element_text(
       face = "bold"
     ),
@@ -11412,262 +11477,7 @@ ggplot2::ggsave(
 
 saveRDS(p_interaction_time_patterns_68, paste0("Outputs/p_interaction_time_patterns_68.rds"))
 
-# -------------------------------------------------
-# --- H0: Delta6h - Delta24h = 0 ------------------
-# --- H1: Delta_t = (KO_t - KO_baseline) - (CTRL_t - CTRL_baseline)
 
-#  Positive change: The signed KO-minus-CTRL cisplatin response difference is greater at 6 h than at 24 h.
-#  Negative change: The signed difference is smaller at 6 h than at 24 h.
-#  Not significant: No statistically significant difference between the two interaction estimates was detected.
-
-# -------------------------------------------------
-# ============================================================
-# Genotype-interaction change: 6h minus 24h
-# Test whether genotype-dependent responses change over time
-# ============================================================
-
-# Use the previously constructed contrast
-stopifnot(
-  is.matrix(L_interaction_change_68),
-  ncol(L_interaction_change_68) == 1L,
-  !is.null(rownames(L_interaction_change_68)),
-  !is.null(colnames(L_interaction_change_68)),
-  all(is.finite(L_interaction_change_68))
-)
-
-print(L_interaction_change_68)
-
-# ------------------------------------------------------------
-# 1. Hypothesis testing across all four pipelines
-# ------------------------------------------------------------
-
-interaction_change_list_68 <- list()
-
-for (sw in software_order_68) {
-  
-  message("Testing temporal interaction change: ", sw)
-  
-  # Use a temporary object to preserve the original models
-  qf_tmp <- msqrob2::hypothesisTest(
-    qf_models[[sw]],
-    i = "proteins",
-    contrast = L_interaction_change_68,
-    adjust.method = "BH",
-    resultsColumnNamePrefix = "temporal_change_"
-  )
-  
-  # Collect the single-contrast inference results
-  results <- msqrob2::msqrobCollect(
-    qf_tmp[["proteins"]],
-    contrast = L_interaction_change_68,
-    resultsColumnNamePrefix = "temporal_change_"
-  )
-  
-  interaction_change_list_68[[sw]] <- as.data.frame(results) |>
-    dplyr::mutate(
-      Software = sw,
-      .before = 1
-    )
-  
-  rm(qf_tmp, results)
-  invisible(gc(verbose = FALSE))
-}
-
-interaction_change_results_68 <- dplyr::bind_rows(
-  interaction_change_list_68
-)
-
-# Inspect results
-print(head(interaction_change_results_68))
-
-
-# ============================================================
-# Temporal interaction changes among consensus proteins
-# Significant joint genotype interactions in all four pipelines
-# ============================================================
-
-# Create a complete protein x software grid
-# This retains missing or untestable combinations
-consensus_change_68 <- tidyr::expand_grid(
-  Software = software_order_68,
-  feature = unique(as.character(interaction_consensus_68))
-) |>
-  dplyr::left_join(
-    interaction_change_results_68 |>
-      dplyr::mutate(
-        Software = as.character(Software),
-        feature = as.character(feature)
-      ) |>
-      dplyr::select(Software, feature, logFC, adjPval),
-    by = c("Software", "feature")
-  ) |>
-  dplyr::mutate(
-    Software = factor(Software, levels = software_order_68),
-    Significant = is.finite(adjPval) &
-      adjPval < 0.05,
-    Direction = dplyr::case_when(
-      Significant & logFC > 0 ~ "Positive change",
-      Significant & logFC < 0 ~ "Negative change",
-      TRUE ~ "Not significant"
-    )
-  )
-
-
-temporal_direction_agreement_68 <- consensus_change_68 |>
-  dplyr::filter(
-    is.finite(logFC),
-    feature %in% interaction_consensus_68
-  ) |>
-  dplyr::group_by(feature) |>
-  dplyr::summarise(
-    N_pipelines = dplyr::n_distinct(Software),
-    All_positive = N_pipelines == 4L && all(logFC > 0),
-    All_negative = N_pipelines == 4L && all(logFC < 0),
-    .groups = "drop"
-  ) |>
-  dplyr::filter(N_pipelines == 4L)
-
-temporal_direction_agreement_68 |>
-  dplyr::summarise(
-    N = dplyr::n(),
-    All_positive = sum(All_positive),
-    All_negative = sum(All_negative),
-    Same_direction_pct =
-      100 * mean(All_positive | All_negative)
-  )
-
-message("For all 17 consensus proteins, the four DIA pipelines agree on the sign of the estimated change in genotype interaction between 6 h and 24 h")
-
-# Summary
-consensus_change_summary_68 <- consensus_change_68 |>
-  dplyr::group_by(Software) |>
-  dplyr::summarise(
-    Consensus_Proteins = dplyr::n(),
-    Tested = sum(is.finite(logFC) & is.finite(adjPval)),
-    Significant = sum(Significant),
-    Positive = sum(Direction == "Positive change"),
-    Negative = sum(Direction == "Negative change"),
-    Percent_Significant = round(
-      100 * Significant / Tested, 1
-    ),
-    .groups = "drop"
-  )
-
-print(consensus_change_summary_68)
-
-
-# ============================================================
-# Temporal interaction changes: consensus proteins only
-# ============================================================
-
-consensus_plot_data_68 <- consensus_change_68 |>
-  dplyr::filter(
-    is.finite(logFC),
-    is.finite(adjPval)
-  ) |>
-  dplyr::group_by(Software, Direction) |>
-  dplyr::summarise(
-    Proteins = dplyr::n(),
-    .groups = "drop"
-  ) |>
-  tidyr::complete(
-    Software = factor(
-      software_order_68,
-      levels = software_order_68
-    ),
-    Direction = c(
-      "Positive change",
-      "Negative change",
-      "Not significant"
-    ),
-    fill = list(Proteins = 0)
-  ) |>
-  dplyr::group_by(Software) |>
-  dplyr::mutate(
-    Percent = if (sum(Proteins) > 0) {
-      100 * Proteins / sum(Proteins)
-    } else {
-      NA_real_
-    }
-  ) |>
-  dplyr::ungroup() |>
-  dplyr::mutate(
-    Direction = factor(
-      Direction,
-      levels = c(
-        "Positive change",
-        "Negative change",
-        "Not significant"
-      )
-    )
-  )
-
-p_consensus_change_68 <- ggplot2::ggplot(
-  consensus_plot_data_68,
-  ggplot2::aes(
-    x = Software,
-    y = Percent,
-    fill = Direction
-  )
-) +
-  ggplot2::geom_col(
-    width = 0.7,
-    color = "white",
-    linewidth = 0.3
-  ) +
-  guides(fill = guide_legend(nrow = 1, byrow = TRUE)) +
-  ggplot2::geom_text(
-    data = consensus_plot_data_68,
-    ggplot2::aes(
-      x = Software,
-      y = Percent,
-      label = ifelse(
-        Proteins > 0,
-        sprintf("%.0f%%", Percent),""),
-      group = Direction),
-    position = ggplot2::position_stack(vjust = 0.5),
-    inherit.aes = FALSE,
-    color = "black",
-    size = 4.5,
-    fontface = "bold"
-  ) +
-  ggplot2::scale_fill_manual(
-    values = c(
-      "Positive change" = "coral",
-      "Negative change" = "skyblue",
-      "Not significant" = "#D9D9D9"
-    )
-  ) +
-  ggplot2::scale_y_continuous(
-    breaks = seq(0, 100, 20),
-    labels = function(x) paste0(x, "%"),
-    expand = ggplot2::expansion(mult = c(0, 0.02))
-  ) +
-  ggplot2::labs(
-    title = "Temporal interaction changes in consensus proteins",
-    x = NULL,
-    y = "Proportion of tested consensus proteins",
-    fill = NULL
-  ) +
-  ggplot2::theme_minimal(base_size = 12) +
-  ggplot2::theme(
-    plot.title = ggplot2::element_text(face = "bold"),
-    axis.text.x = ggplot2::element_text(face = "bold"),
-    legend.position = "bottom",
-    panel.grid.minor = ggplot2::element_blank()
-  )
-
-print(p_consensus_change_68)
-
-ggplot2::ggsave(
-    paste0("Outputs/p_consensus_change_68.pdf"),
-    plot = p_consensus_change_68,
-    device = grDevices::cairo_pdf,
-    width = 6,
-    height = 5,
-    bg = "white")
-
-saveRDS(p_consensus_change_68, paste0("Outputs/p_consensus_change_68.rds"))
 ```
 The results suggest that genotype-dependent differences in the cisplatin response are predominantly associated with the 6h timepoint, although agreement between pipelines varies substantially.
 
@@ -11892,10 +11702,15 @@ p_reproducibility_68 <- reproducibility_results_68 |>
   ggplot2::ggplot(
     ggplot2::aes(x = Software, y = SD_log2, fill = Software)
   ) +
-  ggplot2::geom_boxplot(
-    outlier.shape = NA,
-    width = 0.65
+  geom_violin(trim = TRUE, alpha = 0.25, color = NA) +
+  geom_boxplot(
+    width = 0.16, alpha=0.8, 
+    color = "#344054", outlier.shape = NA
   ) +
+  # Mean point
+    stat_summary(
+        fun = mean, geom = "point", shape = 23, size = 3,
+        fill = "white", color = "black", stroke = 0.8) +
   ggplot2::coord_cartesian(
     ylim = c(
       0,
@@ -11910,17 +11725,27 @@ p_reproducibility_68 <- reproducibility_results_68 |>
   ggplot2::scale_fill_manual(values = software_colors) +
   ggplot2::labs(
     title = "Within-condition quantitative variability",
-    subtitle = "68 retained runs; biological replicates grouped by condition and acquisition batch",
+#    subtitle = "68 retained runs; biological replicates grouped by condition and acquisition batch",
     x = NULL,
     y = "Within-group SD of log2 protein abundance"
   ) +
   ggplot2::theme_bw(base_size = 12) +
   ggplot2::theme(
     legend.position = "none",
-    axis.text.x = ggplot2::element_text(angle = 30, hjust = 1)
+#    axis.text.x = ggplot2::element_text(angle = 30, hjust = 1)
   )
 
 print(p_reproducibility_68)
+
+ggplot2::ggsave(
+    paste0("Outputs/p_reproducibility_68.pdf"),
+    plot = p_reproducibility_68,
+    device = grDevices::cairo_pdf,
+    width = 4,
+    height = 4,
+    bg = "white")
+
+saveRDS(p_reproducibility_68, paste0("Outputs/p_reproducibility_68.rds"))
 
 ```
 Within-condition quantitative variability was assessed using the standard deviation (SD) of log2-transformed protein abundances among biological replicates within the same experimental condition and acquisition batch. DIA-NN exhibited the lowest median SD (0.108), closely followed by AlphaDIA (0.115), whereas Spectronaut showed moderately higher variability (0.144). MaxDIA exhibited the highest median SD (0.266), approximately 2.5-fold greater than DIA-NN. Interquartile ranges showed a similar pattern, with DIA-NN (0.057–0.204) and AlphaDIA (0.062–0.208) displaying narrower variability distributions than Spectronaut (0.074–0.289) and MaxDIA (0.146–0.474). These findings indicate greater within-condition quantitative consistency for DIA-NN and AlphaDIA, whereas MaxDIA showed substantially higher variability. Because the analysis used biological replicates and pipeline-specific protein sets, these estimates reflect combined biological and technical variability rather than isolated technical reproducibility.
@@ -12223,6 +12048,726 @@ saveRDS(p_abundance_precision_68, paste0("Outputs/p_abundance_precision_68.rds")
 ```
 Abundance-dependent precision was evaluated across 7,483 proteins shared by all four DIA pipelines using model residual standard deviations across ten within-pipeline abundance deciles. Following exclusion of Group 4, the overall precision patterns remained consistent with the original 83-run analysis. AlphaDIA and DIA-NN maintained comparatively low residual variability, with median SDs decreasing from 0.207 and 0.211 in the lowest abundance decile to 0.118 and 0.100 in the highest decile, respectively. MaxDIA exhibited consistently higher residual variability across the abundance range (0.437–0.298). Spectronaut showed the strongest abundance dependence, with residual SD decreasing from 0.617 to 0.130, representing a 4.73-fold difference. Its particularly elevated variability among low-abundance proteins persisted despite the earlier correction of intensity values equal to 1. Overall, exclusion of Group 4 did not materially alter the relative precision characteristics of the four pipelines, supporting the robustness of these pipeline-level observations to the sample exclusion.
 
+
+## 31. JUN ~ Genotype
+```{r}
+rm(list = setdiff(ls(), c("cache_dir")))
+invisible(gc(verbose = FALSE))
+
+qf_models_68 <- readRDS(
+  file.path(cache_dir, "qf_models_68runs.rds")
+)
+
+qf_models <- qf_models_68$qf_models
+
+software_order_68 <- c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA")
+stopifnot(all(software_order_68 %in% names(qf_models)))
+
+
+jun_accession <- "P05412"  # human JUN, canonical UniProt accession
+genotype_colors <- c(CTRL = "#0072B2", KO = "#D55E00")
+treat_colors <- c("Baseline" = "#BDBDBD", "Cisplatin 6 h" = "#009E73",
+                  "Cisplatin 24 h" = "#CC79A7")
+batch_colors <- c("20260331" = "#CC79A7", "Group1" = "#E69F00",
+                  "Group2" = "#56B4E9", "Group3" = "#009E73", "Group4" = "#999999")
+software_colors <- c(AlphaDIA = "#0072B2", `DIA-NN` = "#E69F00",
+                     Spectronaut = "#009E73", MaxDIA = "#CC79A7")
+treatment_levels <- c("Baseline", "Cisplatin 6 h", "Cisplatin 24 h")
+
+
+# -------------------------------------------------------------------------
+# Shared eligible runs: exclude the JNK inhibitor condition
+# -------------------------------------------------------------------------
+meta <- as.data.frame(SummarizedExperiment::colData(qf_models[["AlphaDIA"]]))
+
+jun_design_68 <- meta |>
+  dplyr::transmute(
+    Run = as.character(runCol),
+    Genotype = as.character(genotype),
+    Raw_treatment = as.character(treatment),
+    Time = as.character(time),
+    Batch = as.character(Batch),
+    Treatment = dplyr::case_when(
+      Raw_treatment == "Untreated" & Time == "Baseline" ~ "Baseline",
+      Raw_treatment == "cDDP" & Time == "6h" ~ "Cisplatin 6 h",
+      Raw_treatment == "cDDP" & Time == "24h" ~ "Cisplatin 24 h",
+      TRUE ~ NA_character_
+    )
+  ) |>
+  dplyr::filter(!is.na(Treatment), Genotype %in% c("CTRL", "KO")) |>
+  dplyr::mutate(
+    Genotype = factor(Genotype, levels = c("CTRL", "KO")),
+    Treatment = factor(Treatment, levels = treatment_levels),
+    Batch = factor(Batch)
+  )
+
+# -------------------------------------------------------------------------
+# Extract JUN abundance: protein assay and precursor assay
+# -------------------------------------------------------------------------
+jun_rows <- function(se, level) {
+  # Match P05412 as a complete accession token, including sp|P05412|JUN_HUMAN.
+  has_jun <- function(x) {
+    x <- as.character(x)
+    x[is.na(x)] <- ""
+    grepl("(^|[^A-Za-z0-9])P05412([^A-Za-z0-9]|$)", x, perl = TRUE)
+  }
+  # -----------------------
+  rd <- as.data.frame(SummarizedExperiment::rowData(se))
+  group <- if ("Protein.Group" %in% colnames(rd)) {
+    as.character(rd[["Protein.Group"]])
+  } else {
+    rep("", nrow(se))
+  }
+  idx <- which(has_jun(group) | has_jun(rownames(se)))
+  if (!length(idx)) {
+    stop("No JUN / P05412 rows found in ", level,
+         ". Inspect rownames and Protein.Group of the selected assay.")
+  }
+  if (level == "Protein" && length(idx) != 1L) {
+    mat <- SummarizedExperiment::assay(se)
+    coverage <- vapply(idx, function(i) sum(is.finite(as.numeric(mat[i, ]))), numeric(1))
+    details <- data.frame(row_index = idx, row_name = rownames(se)[idx],
+                          group = group[idx], finite_runs = coverage)
+    print(details)
+    stop("More than one JUN protein group matched. Choose the original group explicitly, ",
+         "rather than silently combining protein groups.")
+  }
+  idx
+}
+
+extract_jun <- function(sw, level) {
+  assay_name <- if (level == "Protein") "proteins" else "precursors_norm"
+  se <- qf_models[[sw]][[assay_name]]
+  if (is.null(se)) stop("Missing assay: ", sw, " / ", assay_name)
+  idx <- jun_rows(se, level)
+  m <- as.matrix(SummarizedExperiment::assay(se)[idx, , drop = FALSE])
+  # Expect normalized log2 intensity. Check against the original Rmd pipeline.
+  n_precursors <- colSums(is.finite(m))
+  intensity <- if (level == "Protein") {
+    as.numeric(m[1, ])
+  } else {
+    apply(m, 2, function(v) {
+      v <- v[is.finite(v)]
+      if (length(v)) stats::median(v) else NA_real_
+    })
+  }
+  data.frame(Software = sw, Level = level, Run = colnames(se),
+             Abundance = as.numeric(intensity),
+             N_Precursors = if (level == "Precursor") n_precursors else NA_integer_,
+             stringsAsFactors = FALSE)
+}
+
+jun_data_68 <- dplyr::bind_rows(lapply(software_order_68, function(sw) {
+  dplyr::bind_rows(extract_jun(sw, "Protein"), extract_jun(sw, "Precursor"))
+  })) |>
+  dplyr::right_join(jun_design_68, by = "Run", relationship = "many-to-one") |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68),
+    Level = factor(Level, levels = c("Protein", "Precursor"))
+  ) |>
+  dplyr::arrange(Level, Software, Treatment, Genotype, Run)
+
+
+# -------------------------------------------------------------------------
+# Plot JUN abundance
+# -------------------------------------------------------------------------
+plot_abundance <- function(level) {
+  d <- jun_data_68 |>
+    dplyr::filter(as.character(Level) == level, is.finite(Abundance))
+  ggplot2::ggplot(d, ggplot2::aes(x = Genotype, y = Abundance,
+                                 color = Genotype)) +
+    ggplot2::geom_boxplot(width = 0.5, outlier.shape = NA, fill = "white") +
+    ggplot2::geom_point(ggplot2::aes(shape = Treatment),
+                        position = ggplot2::position_jitter(width = 0.12, height = 0),
+                        size = 1.65, alpha = 0.83) +
+    ggplot2::facet_wrap(~Software, ncol = 2, scales = "free_y") +
+    ggplot2::scale_color_manual(values = genotype_colors, guide = "none") +
+    ggplot2::scale_shape_manual(values = c("Baseline" = 16,
+                                           "Cisplatin 6 h" = 17,
+                                           "Cisplatin 24 h" = 15),
+                               name = "Treatment") +
+    ggplot2::labs(x = NULL,
+                  y = if (level == "Protein") "JUN protein abundance (log2)"
+                      else "Median JUN precursor abundance (log2)") +
+    ggplot2::theme_bw(base_size = 10) +
+    ggplot2::theme(strip.text = ggplot2::element_text(face = "bold"),
+                   legend.position = "bottom")
+}
+
+jun_protein_68 <- plot_abundance("Protein")
+
+ggplot2::ggsave(
+    paste0("Outputs/jun_protein_68.pdf"),
+    plot = jun_protein_68,
+    device = grDevices::cairo_pdf,
+    width = 4,
+    height = 4,
+    bg = "white")
+
+saveRDS(jun_protein_68, paste0("Outputs/jun_protein_68.rds"))
+
+
+jun_precursor_68 <- plot_abundance("Precursor")
+
+ggplot2::ggsave(
+    paste0("Outputs/jun_precursor_68.pdf"),
+    plot = jun_precursor_68,
+    device = grDevices::cairo_pdf,
+    width = 4,
+    height = 4,
+    bg = "white")
+
+saveRDS(jun_precursor_68, paste0("Outputs/jun_precursor_68.rds"))
+# -------------------------------------------------------------------------
+# adjusted JUN genotype effects, from run values
+# -------------------------------------------------------------------------
+fit_genotype <- function(dat, overall = FALSE) {
+  dat <- dat |>
+    dplyr::filter(is.finite(Abundance), !is.na(Genotype),
+                  !is.na(Batch), !is.na(Treatment)) |>
+    dplyr::mutate(Genotype = factor(Genotype, levels = c("CTRL", "KO")))
+  dat <- droplevels(dat)
+  out <- data.frame(log2FC = NA_real_, Lower = NA_real_, Upper = NA_real_,
+                    P_value = NA_real_, N = nrow(dat))
+  if (nrow(dat) < 4L || nlevels(dat$Genotype) < 2L) return(out)
+
+  # In treatment-specific fits, use additive batch adjustment when possible.
+  f <- if (overall) {
+    if (nlevels(dat$Batch) > 1L)
+      Abundance ~ Genotype + Treatment + Batch
+    else Abundance ~ Genotype + Treatment
+  } else {
+    if (nlevels(dat$Batch) > 1L)
+      Abundance ~ Genotype + Batch
+    else Abundance ~ Genotype
+  }
+
+  fit <- tryCatch(stats::lm(f, data = dat), error = function(e) NULL)
+  if (is.null(fit) || stats::df.residual(fit) < 1) return(out)
+  cf <- stats::coef(fit)
+  if (!("GenotypeKO" %in% names(cf)) || !is.finite(cf[["GenotypeKO"]])) {
+    warning("GenotypeKO is not estimable (possible genotype/batch confounding).")
+    return(out)
+  }
+  ci <- tryCatch(stats::confint(fit, parm = "GenotypeKO", level = 0.95),
+                 error = function(e) c(NA_real_, NA_real_))
+  coeftab <- summary(fit)$coefficients
+  out$log2FC <- unname(cf[["GenotypeKO"]])
+  out$Lower <- as.numeric(ci[1])
+  out$Upper <- as.numeric(ci[2])
+  out$P_value <- coeftab["GenotypeKO", "Pr(>|t|)"]
+  out
+}
+
+
+combs <- expand.grid(
+  Level = c("Protein", "Precursor"), Software = software_order_68,
+  Treatment = treatment_levels, stringsAsFactors = FALSE)
+
+jun_specific_fc_68 <- dplyr::bind_rows(lapply(seq_len(nrow(combs)), function(i) {
+  r <- combs[i, ]
+  d <- jun_data_68 |>
+    dplyr::filter(as.character(Level) == r$Level,
+                  as.character(Software) == r$Software,
+                  as.character(Treatment) == r$Treatment)
+  cbind(r, fit_genotype(d, overall = FALSE))
+  })) |>
+  dplyr::mutate(
+    FDR = stats::p.adjust(P_value, method = "BH"),  # 24 planned tests
+    Significant = is.finite(FDR) & FDR < 0.05
+  )
+
+jun_treatment_specific_98 <- jun_specific_fc_68 |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order_68),
+    Level = factor(Level, levels = c("Protein", "Precursor")),
+    Treatment = factor(Treatment, levels = treatment_levels),
+    Label = ifelse(is.finite(log2FC),
+                   sprintf("%.2f%s", log2FC, ifelse(Significant, "*", "")), "NA")
+  ) |>
+  ggplot2::ggplot(ggplot2::aes(Treatment, Software, fill = log2FC)) +
+  ggplot2::geom_tile(color = "white", linewidth = 1) +
+  ggplot2::geom_text(ggplot2::aes(label = Label), size = 3.5) +
+  ggplot2::facet_grid(Level ~ ., scales = "free_y", space = "free_y") +
+  ggplot2::scale_fill_gradient(low = "#2166AC", high = "#E5E9F5",
+                               name = "KO − CTRL\nlog2FC") +
+  ggplot2::labs(title = "* FDR < 0.05", x = NULL, y = NULL) +
+  ggplot2::theme_minimal(base_size = 10) +
+  ggplot2::theme(panel.grid = ggplot2::element_blank(),
+                 axis.text.x = ggplot2::element_text(angle = 30, hjust = 1),
+                 strip.text = ggplot2::element_text(face = "bold"),
+                 plot.title = ggplot2::element_text(size = 9))
+
+
+
+ggplot2::ggsave(
+    paste0("Outputs/jun_treatment_specific_98.pdf"),
+    plot = jun_treatment_specific_98,
+    device = grDevices::cairo_pdf,
+    width = 4,
+    height = 3,
+    bg = "white")
+
+saveRDS(jun_treatment_specific_98, paste0("Outputs/jun_treatment_specific_98.rds"))
+
+# --------------------------------------------------------
+combs <- expand.grid(
+  Level = c("Protein", "Precursor"), Software = software_order_68,
+  stringsAsFactors = FALSE)
+
+jun_combined_fc_68 <- dplyr::bind_rows(lapply(seq_len(nrow(combs)), function(i) {
+  r <- combs[i, ]
+  d <- jun_data_68 |>
+    dplyr::filter(as.character(Level) == r$Level,
+                  as.character(Software) == r$Software)
+  cbind(r, fit_genotype(d, overall = TRUE))
+})) |>
+  dplyr::mutate(
+    FDR = stats::p.adjust(P_value, method = "BH"),  # 8 planned tests
+    Significant = ifelse(is.finite(FDR) & FDR < 0.05, "FDR < 0.05", "ns")
+  )
+
+jun_overall_effect_68 <- jun_combined_fc_68 |>
+  dplyr::mutate(Software = factor(Software, levels = software_order_68),
+                Level = factor(Level, levels = c("Protein", "Precursor"))) |>
+  ggplot2::ggplot(ggplot2::aes(y = Software)) +
+  ggplot2::geom_vline(xintercept = 0, linetype = "dashed", color = "grey60") +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(xmin = Lower, xmax = Upper),
+    width = 0.12,
+    linewidth = 0.6,
+    colour = "black") +
+  ggplot2::geom_point(ggplot2::aes(x = log2FC, fill = Significant),
+                      shape = 21, size = 3, color = "black") +
+  ggplot2::facet_grid(. ~ Level) +
+  ggplot2::scale_fill_manual(values = c("FDR < 0.05" = "#009E73", "ns" = "grey80"),
+                             name = "") +
+  ggplot2::labs(x = "Adjusted JUN log2FC (KO − CTRL)", y = NULL) +
+  ggplot2::theme_bw(base_size = 10) +
+  ggplot2::theme(strip.text = ggplot2::element_text(face = "bold"),
+                 legend.position = "bottom")
+
+ggplot2::ggsave(
+    paste0("Outputs/jun_overall_effect_68.pdf"),
+    plot = jun_overall_effect_68,
+    device = grDevices::cairo_pdf,
+    width = 3,
+    height = 3,
+    bg = "white")
+
+saveRDS(jun_overall_effect_68, paste0("Outputs/jun_overall_effect_68.rds"))
+# -------------------------------------------------------------------------
+# ROC: common finite JUN protein measurements across pipelines
+# -------------------------------------------------------------------------
+
+roc_wide <- jun_data_68 |>
+  dplyr::filter(Level == "Protein") |>
+  dplyr::select(Software, Run, Abundance) |>
+  dplyr::mutate(Software = as.character(Software)) |>
+  tidyr::pivot_wider(id_cols = Run, names_from = Software, values_from = Abundance) |>
+  dplyr::inner_join(jun_design_68 |>
+                      dplyr::select(Run, Genotype, Treatment), by = "Run")
+
+common_roc <- roc_wide |>
+  dplyr::filter(dplyr::if_all(dplyr::all_of(software_order_68), is.finite))
+
+rocs <- lapply(software_order_68, function(sw) {
+  pROC::roc(response = common_roc$Genotype, predictor = common_roc[[sw]],
+            levels = c("CTRL", "KO"), direction = ">", quiet = TRUE)
+  })
+
+names(rocs) <- software_order_68
+
+jun_auc_summary_68 <- data.frame(
+  Software = software_order_68,
+  AUC = vapply(rocs, function(x) as.numeric(pROC::auc(x)), numeric(1))
+) |>
+  dplyr::arrange(dplyr::desc(AUC))
+
+jun_roc_plot_data_68 <- dplyr::bind_rows(lapply(names(rocs), function(sw) {
+  d <- as.data.frame(pROC::coords(rocs[[sw]], x = "all",
+                                  ret = c("specificity", "sensitivity"),
+                                  transpose = FALSE))
+  data.frame(Software = sw, FPR = 1 - d$specificity,
+             Sensitivity = d$sensitivity, Specificity = d$specificity)
+})) |>
+  dplyr::arrange(Software, FPR, Sensitivity)
+
+
+auc_labels <- stats::setNames(
+  sprintf("%s (%.3f)", jun_auc_summary_68$Software, jun_auc_summary_68$AUC),
+  jun_auc_summary_68$Software)
+
+jun_roc_68 <- jun_roc_plot_data_68 |>
+  dplyr::mutate(Software = factor(Software, levels = jun_auc_summary_68$Software)) |>
+  ggplot2::ggplot(ggplot2::aes(FPR, Sensitivity, color = Software)) +
+  ggplot2::geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+                       color = "grey65") +
+  ggplot2::geom_step(linewidth = 1.05) +
+  ggplot2::scale_color_manual(values = software_colors,
+                              breaks = jun_auc_summary_68$Software,
+                              labels = auc_labels[jun_auc_summary_68$Software]) +
+  ggplot2::coord_equal(xlim = c(-0.03, 1.01), ylim = c(-0.03, 1.01), expand = FALSE) +
+  ggplot2::labs(x = "False positive rate (1 − specificity)",
+                y = "True positive rate (sensitivity)", color = NULL) +
+  ggplot2::theme_bw(base_size = 10) +
+  ggplot2::theme(
+    legend.text = ggplot2::element_text(size = 8),
+    legend.position = "inside",
+    legend.position.inside = c(0.98, 0.02),
+    legend.justification = c(1, 0),
+    legend.direction = "vertical",
+    legend.background = element_rect(fill = "white", color = "grey75", linewidth = 0.4),
+    legend.key = element_rect(fill = "white"),
+    legend.title = element_blank())
+
+
+ggplot2::ggsave(
+    paste0("Outputs/jun_roc_68.pdf"),
+    plot = jun_roc_68,
+    device = grDevices::cairo_pdf,
+    width = 3.5,
+    height = 3.5,
+    bg = "white")
+
+saveRDS(jun_roc_68, paste0("Outputs/jun_roc_68.rds"))
+
+# --------------------------------------------------------
+# ----- heatmap ------------------------
+# ---------------------------------
+
+jun_heatmap_data_68 <- common_roc |>
+  dplyr::select(
+    Run, Genotype, Treatment,
+    dplyr::all_of(software_order_68)
+  ) |>
+  dplyr::left_join(
+    jun_design_68 |>
+      dplyr::transmute(
+        Run,
+        Batch = as.character(Batch)
+      ),
+    by = "Run"
+  ) |>
+  dplyr::mutate(
+    Run = as.character(Run),
+    Genotype = as.character(Genotype),
+    Treatment = as.character(Treatment),
+    Batch = as.character(Batch)
+  )
+
+jun_abundance_mat_68 <- t(
+  as.matrix(
+    jun_heatmap_data_68[, software_order_68]
+  )
+)
+
+rownames(jun_abundance_mat_68) <- software_order_68
+colnames(jun_abundance_mat_68) <- jun_heatmap_data_68$Run
+
+jun_z_mat_68 <- t(
+  scale(t(jun_abundance_mat_68))
+)
+
+# Mean JUN z-score across all four software pipelines
+mean_jun_z <- colMeans(jun_z_mat_68, na.rm = TRUE)
+# Order runs: highest JUN abundance on the left
+run_order <- order(mean_jun_z, decreasing = TRUE)
+# Reorder abundance matrix
+jun_z_mat_68 <- jun_z_mat_68[, run_order, drop = FALSE]
+
+meta <- jun_heatmap_data_68[
+  match(
+    colnames(jun_z_mat_68),
+    jun_heatmap_data_68$Run
+  ),
+  ,
+  drop = FALSE
+]
+
+
+meta$X <- seq_len(nrow(meta))
+
+# Keep mean score for checking
+meta$Mean_JUN_z <- colMeans(jun_z_mat_68)
+
+row_positions <- c(
+  Genotype = 7.60,
+  Treatment = 7.34,
+  Batch = 7.08,
+  AlphaDIA = 6.35,
+  `DIA-NN` = 5.5,
+  Spectronaut = 4.65,
+  MaxDIA = 3.8
+)
+
+z_colors <- circlize::colorRamp2(
+  c(-2, 0, 2),
+  c("#2166AC", "white", "#B2182B")
+)
+
+jun_tiles <- as.data.frame(
+  as.table(jun_z_mat_68)
+) |>
+  dplyr::rename(
+    Software = Var1,
+    Run = Var2,
+    Z = Freq
+  ) |>
+  dplyr::mutate(
+    X = match(as.character(Run), meta$Run),
+    Y = unname(row_positions[as.character(Software)]),
+    Fill = z_colors(Z),
+    
+    xmin = X - 0.5,
+    xmax = X + 0.5,
+    ymin = Y - 0.44,
+    ymax = Y + 0.44
+  )
+
+# 5. Prepare genotype, treatment and batch tiles
+annotation_tiles <- meta |>
+  dplyr::select(
+    X, Genotype, Treatment, Batch
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(Genotype, Treatment, Batch),
+    names_to = "Track",
+    values_to = "Category"
+  ) |>
+  dplyr::mutate(
+    Y = unname(row_positions[Track]),
+    
+    Fill = dplyr::case_when(
+      Track == "Genotype" ~
+        unname(genotype_colors[Category]),
+      Track == "Treatment" ~
+        unname(treat_colors[Category]),
+      Track == "Batch" ~
+        unname(batch_colors[Category])
+    ),
+    
+    xmin = X - 0.5,
+    xmax = X + 0.5,
+    ymin = Y - 0.115,
+    ymax = Y + 0.115
+  )
+
+
+jun_heatmap_68 <- ggplot() +
+  geom_rect(
+    data = jun_tiles,
+    aes(
+      xmin = xmin, xmax = xmax,
+      ymin = ymin, ymax = ymax,
+      fill = Fill
+    ),
+    color = "white",
+    linewidth = 0.01
+  ) +
+  
+  geom_rect(
+    data = annotation_tiles,
+    aes(
+      xmin = xmin, xmax = xmax,
+      ymin = ymin, ymax = ymax,
+      fill = Fill
+    ),
+    color = NA
+  ) +
+  
+  scale_fill_identity() +
+  
+  scale_x_continuous(
+    limits = c(0.5, nrow(meta) + 0.5),
+    expand = c(0, 0)
+  ) +
+  
+  scale_y_continuous(
+    breaks = unname(row_positions),
+    labels = names(row_positions),
+    limits = c(2.8, 7.9),
+    expand = c(0, 0)
+  ) +
+  
+  labs(
+    title = paste0(
+      "JUN abundance across ",
+      nrow(meta),
+      " shared LC-MS runs"
+    ),
+    x = NULL,
+    y = NULL
+  ) +
+  
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0),
+    plot.title = element_text(
+      face = "bold",
+      size = 13,
+      hjust = 0.5,
+      margin = margin(b = 7)
+    ),
+    axis.text.y = element_text(
+      face = "bold",
+      size = 10,
+      color = "black",
+      margin = margin(r = 3)
+    ),
+    axis.text.x = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+
+
+legend_theme <- theme_void(base_size = 10) +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.title = element_text(
+      face = "bold",
+      size = 10
+    ),
+    legend.text = element_text(size = 9),
+    legend.key.size = unit(3.5, "mm"),
+    legend.spacing.x = unit(2, "mm"),
+    legend.margin = margin(0, 0, 0, 0),
+    legend.box.margin = margin(0, 0, 0, 0)
+  )
+
+make_category_legend <- function(colors, title) {
+  
+  d <- data.frame(
+    Category = factor(
+      names(colors),
+      levels = names(colors)
+    ),
+    Value = 1
+  )
+  
+  p <- ggplot(
+    d,
+    aes(x = Category, y = Value, fill = Category)
+  ) +
+    geom_col() +
+    scale_fill_manual(
+      values = colors,
+      name = title,
+      breaks = names(colors),
+      drop = FALSE
+    ) +
+    guides(
+      fill = guide_legend(
+        nrow = 1,
+        byrow = TRUE,
+        title.position = "top"
+      )
+    ) +
+    legend_theme
+  
+  cowplot::get_legend(p)
+}
+
+z_legend_plot <- ggplot(
+  data.frame(
+    z = seq(-2, 2, length.out = 101),
+    y = 1
+  ),
+  aes(x = z, y = y, fill = z)
+) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "#2166AC",
+    mid = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    limits = c(-2, 2),
+    breaks = seq(-2, 2, 1),
+    name = "JUN z-score",
+    guide = guide_colorbar(
+      direction = "horizontal",
+      title.position = "top",
+      barwidth = unit(35, "mm"),
+      barheight = unit(4, "mm")
+    )
+  ) +
+  legend_theme
+
+legend_z <- cowplot::get_legend(z_legend_plot)
+
+legend_genotype <- make_category_legend(
+  genotype_colors, "Genotype"
+)
+
+legend_treatment <- make_category_legend(
+  treat_colors, "Treatment"
+)
+
+# Only display batches actually present
+legend_batch <- make_category_legend(
+  batch_colors[names(batch_colors) %in% meta$Batch],
+  "Batch"
+)
+
+
+legend_row1 <- cowplot::plot_grid(
+  legend_z,
+  legend_genotype,
+  ncol = 2,
+  rel_widths = c(1, 1)
+)
+
+legend_row2 <- cowplot::plot_grid(
+  legend_treatment,
+  legend_batch,
+  ncol = 2,
+  rel_widths = c(1, 1)
+)
+
+legend_combined <- cowplot::plot_grid(
+  legend_row1,
+  legend_row2,
+  ncol = 1,
+  rel_heights = c(1, 1)
+)
+
+
+jun_heatmap_body_68 <- jun_heatmap_68
+# Position adjustments
+heatmap_shift_x <- -0.06   # Shift heatmap to the left
+heatmap_width   <- 1.06    # Preserve right boundary
+# Assemble manually
+jun_heatmap_68 <- cowplot::ggdraw() +
+  # Main heatmap
+  cowplot::draw_plot(
+    jun_heatmap_body_68,
+    x = heatmap_shift_x,
+    y = 0.22,
+    width = heatmap_width,
+    height = 0.78
+  ) +
+
+  # Legends, positioned independently
+  cowplot::draw_plot(
+    legend_combined,
+    x = 0,
+    y = 0,
+    width = 1,
+    height = 0.22
+  )
+
+ggplot2::ggsave(
+    paste0("Outputs/jun_heatmap_68.pdf"),
+    plot = jun_heatmap_68,
+    device = grDevices::cairo_pdf,
+    width = 6.5,
+    height = 4,
+    bg = "white")
+
+saveRDS(jun_heatmap_68, paste0("Outputs/jun_heatmap_68.rds"))
+```
+
 # - - - - - - - - - - 
 # Publication-ready multipanel figures
 
@@ -12235,7 +12780,6 @@ mainFigs_dir <- "Manuscript/Main_figures"
 #results_dir <- file.path(cache_dir, "statistical_results")
 
 dir.create(mainFigs_dir, recursive = TRUE, showWarnings = FALSE)
-dir.create(suppFigs_dir, recursive = TRUE, showWarnings = FALSE)
 
 
 clean_panel <- function(p) {
@@ -12251,7 +12795,15 @@ export_figure <- function(p, filename, width, height) {
     units = "in", device = grDevices::cairo_pdf,
     bg = "white"
   )
-
+  
+#  ggsave(
+#    file.path(mainFigs_dir, paste0(filename, ".svg")),
+#    plot = p + theme(text = element_text(family = "DejaVu Sans")),
+#    width = width, height = height,
+#    units = "in", device = svglite::svglite,
+#    bg = "white"
+#  )
+  
   message("Exported: ", filename)
 }
 ```
@@ -12356,7 +12908,7 @@ fig4 <- (
 
 print(fig4)
 
-export_figure(fig4, "Figure_4_NIMAA_Lollipop_Nestedness", 9, 6)
+export_figure(fig4, "Figure_4_NIMAA_Lollipop_Nestedness", 10, 7)
 
 ```
 
@@ -12478,23 +13030,6 @@ print(fig7)
 ```
 **Figure 7. Pairwise agreement in protein log2 fold changes across four DIA proteomics analysis pipelines.** Scatterplots compare protein-level log2 fold-change estimates for KO versus CTRL after 6 h of cisplatin treatment across all six pairwise combinations of AlphaDIA, DIA-NN, Spectronaut, and MaxDIA, based on the 68-run analysis. Each point represents a protein group with fold-change estimates available from both pipelines. The x- and y-axes represent the log2 fold changes estimated by the first and second pipelines named in each panel, respectively. Orange dashed lines indicate the line of identity (y = x), representing perfect agreement between pipelines. Points closer to this line indicate greater concordance in estimated fold-change magnitude and direction, whereas deviations reflect differences in quantitative effect-size estimates. Comparisons illustrate the consistency and variability of protein-level differential abundance estimates across DIA analysis pipelines.
 
-## Supp Fig Sx
-
-```{r}
-rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
-invisible(gc(verbose = FALSE))
-
-# Retrieve the 68-run fold-change agreement plot
-figSx <- readRDS("Outputs/p_scatter_agreement_6h_68.rds")
-
-
-export_figure(
-  figSx,
-  "Figure_Sx_FoldChange_Agreement_68",
-  8, 10)
-
-print(figSx)
-```
 
 
 ## Fig 8: Temporal interactions
@@ -12507,9 +13042,33 @@ invisible(gc(verbose = FALSE))
 p8a <- readRDS("Outputs/p_interaction_agreement_68.rds")
 p8b <- readRDS("Outputs/p_interaction_time_patterns_68.rds")
 p8c <- readRDS("Outputs/p_interaction_effects_68.rds")
-p8d <- readRDS("Outputs/p_consensus_change_68.rds")
+p8d <- readRDS("Outputs/p_reproducibility_68.rds")
 
 
+# Panel A: 
+p8a <- p8a +
+  labs(
+    title = "Cross-pipeline interaction \nagreement",
+    subtitle = NULL,
+    x = "Pipelines detecting significant \ninteraction"
+  ) +
+  theme(
+    axis.title.y = element_text(
+      size = 12,
+      color = "black",
+      margin = margin(r = 10)
+    )
+  )
+
+
+# Panel B: 
+p8b <- p8b +
+  labs(
+    title = "Time-specific interaction",
+    subtitle = NULL,
+    y = "Number of proteins", x = ""
+  ) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
 
 # Panel C: Genotype-interaction effect sizes
 p8c <- p8c +
@@ -12532,7 +13091,8 @@ p8d <- p8d +
     title = "Within-condition\nquantitative variability",
     subtitle = NULL,
     y = "Within-group SD of log2 protein\nabundance"
-  )
+  )+
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
 
 
 # Assemble Figure 8
@@ -12549,7 +13109,7 @@ fig8_68 <- (
 export_figure(
   fig8_68,
   "Figure_8_Temporal_Interactions_68",
-  7, 8
+  7.5, 8.5
 )
 
 print(fig8_68)
@@ -12562,203 +13122,12 @@ rm(list = setdiff(ls(), c("mainFigs_dir", "export_figure", "clean_panel")))
 invisible(gc(verbose = FALSE))
 
 # ============================================================
-# Figure 9: Export all underlying numerical data
-# ============================================================
-
-fig9_data_dir_68 <- file.path(
-  cache_dir, "manuscript_figures"
-)
-
-dir.create(
-  fig9_data_dir_68,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-# ------------------------------------------------------------
-# Panels A and B: JUN abundance per sample
-# ------------------------------------------------------------
-
-fig9_AB_data_68 <- jun_data_fig9_68 |>
-  dplyr::select(
-    Level, Software, Run, Genotype,
-    Treatment, Batch, Abundance,
-    dplyr::any_of("N_Precursors")
-  ) |>
-  dplyr::arrange(Level, Software, Treatment, Genotype, Run)
-
-# ------------------------------------------------------------
-# Panel C: Treatment-specific JUN log2FC
-# ------------------------------------------------------------
-
-fig9_C_data_68 <- jun_specific_fc_68 |>
-  dplyr::select(
-    Level, Software, Treatment,
-    log2FC, Lower, Upper,
-    P_value, FDR, Significant, N
-  ) |>
-  dplyr::arrange(Level, Treatment, Software)
-
-# ------------------------------------------------------------
-# Panel D: Overall adjusted JUN log2FC
-# ------------------------------------------------------------
-
-fig9_D_data_68 <- jun_combined_fc_68 |>
-  dplyr::select(
-    Level, Software,
-    log2FC, Lower, Upper,
-    P_value, FDR, Significant, N
-  ) |>
-  dplyr::arrange(Level, Software)
-
-# ------------------------------------------------------------
-# Panel E: JUN protein abundance and within-pipeline z-scores
-# Reconstruct values from the same existing measurements
-# ------------------------------------------------------------
-
-fig9_E_data_68 <- jun_protein_68 |>
-  dplyr::inner_join(
-    jun_design_68 |>
-      dplyr::select(
-        Run, Genotype, Treatment, Batch
-      ),
-    by = "Run"
-  ) |>
-  dplyr::group_by(Software) |>
-  dplyr::mutate(
-    JUN_zscore = as.numeric(scale(Abundance))
-  ) |>
-  dplyr::ungroup() |>
-  dplyr::arrange(Software, Run)
-
-# Save independent clustering order for each pipeline
-fig9_E_cluster_order_68 <- dplyr::bind_rows(
-  lapply(seq_along(software_order_68), function(i) {
-
-    sw <- software_order_68[i]
-
-    d <- fig9_E_data_68 |>
-      dplyr::filter(Software == sw)
-
-    meta <- jun_design_68 |>
-      dplyr::arrange(Run)
-
-    z <- d$JUN_zscore[match(meta$Run, d$Run)]
-
-    # Same clustering input as the original heatmap:
-    # non-finite values replaced by zero for clustering only
-    cluster_z <- z
-    cluster_z[!is.finite(cluster_z)] <- 0
-
-    hc <- stats::hclust(
-      stats::dist(matrix(cluster_z, ncol = 1)),
-      method = "ward.D2"
-    )
-
-    data.frame(
-      Software = sw,
-      Cluster_position = seq_along(hc$order),
-      Run = meta$Run[hc$order]
-    )
-  })
-)
-
-# ------------------------------------------------------------
-# Panel F: ROC coordinates and AUC
-# ------------------------------------------------------------
-
-fig9_F_ROC_data_68 <- jun_roc_plot_data_68 |>
-  dplyr::select(
-    Software, FPR, Sensitivity,
-    dplyr::any_of("Specificity")
-  ) |>
-  dplyr::arrange(Software, FPR, Sensitivity)
-
-fig9_F_AUC_data_68 <- jun_auc_summary_68 |>
-  dplyr::arrange(dplyr::desc(AUC))
-
-# ------------------------------------------------------------
-# Export all sheets into one Excel workbook
-# ------------------------------------------------------------
-
-fig9_data_file_68 <- file.path(
-  fig9_data_dir_68,
-  "Figure_9_JUN_Source_Data_68.xlsx"
-)
-
-fig9_wb_68 <- openxlsx::createWorkbook()
-
-fig9_sheets_68 <- list(
-  "AB_JUN_Abundance" = fig9_AB_data_68,
-  "C_Treatment_log2FC" = fig9_C_data_68,
-  "D_Overall_log2FC" = fig9_D_data_68,
-  "E_JUN_Zscores" = fig9_E_data_68,
-  "E_Cluster_Order" = fig9_E_cluster_order_68,
-  "F_ROC_Coordinates" = fig9_F_ROC_data_68,
-  "F_AUC" = fig9_F_AUC_data_68
-)
-
-for (sheet_name in names(fig9_sheets_68)) {
-
-  openxlsx::addWorksheet(
-    fig9_wb_68,
-    sheet_name
-  )
-
-  openxlsx::writeData(
-    fig9_wb_68,
-    sheet = sheet_name,
-    x = fig9_sheets_68[[sheet_name]],
-    withFilter = TRUE
-  )
-
-  openxlsx::freezePane(
-    fig9_wb_68,
-    sheet = sheet_name,
-    firstRow = TRUE
-  )
-
-  openxlsx::setColWidths(
-    fig9_wb_68,
-    sheet = sheet_name,
-    cols = seq_len(ncol(fig9_sheets_68[[sheet_name]])),
-    widths = "auto"
-  )
-}
-
-openxlsx::saveWorkbook(
-  fig9_wb_68,
-  fig9_data_file_68,
-  overwrite = TRUE
-)
-
-cat("Figure 9 source data saved to:\n",
-    fig9_data_file_68, "\n")
-
-print(
-  data.frame(
-    Sheet = names(fig9_sheets_68),
-    Rows = vapply(fig9_sheets_68, nrow, integer(1))
-  )
-)
-```
-
-#nnn
-```{r figure_9_six_panel_layout_68, message=FALSE, warning=FALSE}
-library(ggplot2)
-library(dplyr)
-library(patchwork)
-library(grid)
-library(gridExtra)
-library(ComplexHeatmap)
-library(circlize)
-
-# ============================================================
 # A and B: JUN protein and precursor abundance
 # Four software facets arranged 2 x 2 within each panel
 # ============================================================
 
-p9A_final_68 <- p9b_68 +
+p9a <- readRDS("Outputs/jun_protein_68.rds")
+p9A_final_68 <- p9a +
   facet_wrap(~ Software, ncol = 2, scales = "free_y") +
   labs(title = NULL, y = "JUN protein abundance\n(log2)") +
   theme(
@@ -12769,7 +13138,8 @@ p9A_final_68 <- p9b_68 +
     axis.title = element_text(size = 10)
   )
 
-p9B_final_68 <- p9c_68 +
+p9b <- readRDS("Outputs/jun_precursor_68.rds")
+p9B_final_68 <- p9b +
   facet_wrap(~ Software, ncol = 2, scales = "free_y") +
   labs(title = NULL, y = "Median JUN precursor\nabundance (log2)") +
   theme(
@@ -12783,8 +13153,8 @@ p9B_final_68 <- p9c_68 +
 # ============================================================
 # C: Treatment-specific JUN log2FC heatmap
 # ============================================================
-
-p9C_final_68 <- p9a_68 +
+p9c <- readRDS("Outputs/jun_treatment_specific_98.rds")
+p9C_final_68 <- p9c +
   labs(title = NULL, subtitle = "* FDR < 0.05") +
   theme(
     axis.text.x = element_text(
@@ -12799,8 +13169,8 @@ p9C_final_68 <- p9a_68 +
 # ============================================================
 # D: Overall JUN KO effect with 95% CI
 # ============================================================
-
-p9D_final_68 <- p9d_68 +
+p9d <- readRDS("Outputs/jun_overall_effect_68.rds")
+p9D_final_68 <- p9d +
   labs(title = NULL) +
   theme(
     strip.text = element_text(size = 10, face = "bold"),
@@ -12814,189 +13184,14 @@ p9D_final_68 <- p9d_68 +
 # E: Four independent heatmaps, shared horizontal legends
 # Reuse heatmap_grobs_68 from the existing Figure 9E chunk
 # ============================================================
+p9e <- readRDS("Outputs/jun_heatmap_68.rds")
+p9E_final_68 <- p9e 
 
-# Compact heatmaps in a 2 x 2 arrangement
-heatmap_grid_final_68 <- gridExtra::arrangeGrob(
-  grobs = heatmap_grobs_68,
-  ncol = 2
-)
-
-# Shared horizontal legends
-legend_z_68 <- ComplexHeatmap::Legend(
-  title = "JUN z-score",
-  col_fun = circlize::colorRamp2(
-    c(-2.5, 0, 2.5),
-    c("#2166AC", "white", "#B2182B")
-  ),
-  direction = "horizontal",
-  legend_width = grid::unit(3.0, "cm"),
-  title_gp = grid::gpar(fontsize = 9),
-  labels_gp = grid::gpar(fontsize = 8)
-)
-
-legend_genotype_68 <- ComplexHeatmap::Legend(
-  title = "Genotype",
-  at = names(annotation_colors_68$Genotype),
-  legend_gp = grid::gpar(
-    fill = annotation_colors_68$Genotype
-  ),
-  nrow = 1,
-  title_gp = grid::gpar(fontsize = 9),
-  labels_gp = grid::gpar(fontsize = 8),
-  grid_width = grid::unit(3, "mm"),
-  grid_height = grid::unit(3, "mm")
-)
-
-legend_treatment_68 <- ComplexHeatmap::Legend(
-  title = "Treatment",
-  at = names(annotation_colors_68$Treatment),
-  legend_gp = grid::gpar(
-    fill = annotation_colors_68$Treatment
-  ),
-  nrow = 1,
-  title_gp = grid::gpar(fontsize = 9),
-  labels_gp = grid::gpar(fontsize = 8),
-  grid_width = grid::unit(3, "mm"),
-  grid_height = grid::unit(3, "mm")
-)
-
-legend_batch_68 <- ComplexHeatmap::Legend(
-  title = "Batch",
-  at = names(annotation_colors_68$Batch),
-  legend_gp = grid::gpar(
-    fill = annotation_colors_68$Batch
-  ),
-  nrow = 2,
-  title_gp = grid::gpar(fontsize = 9),
-  labels_gp = grid::gpar(fontsize = 8),
-  grid_width = grid::unit(3, "mm"),
-  grid_height = grid::unit(3, "mm")
-)
-
-# Arrange shared legends in two horizontal rows
-legend_top_68 <- ComplexHeatmap::packLegend(
-  legend_z_68,
-  legend_genotype_68,
-  direction = "horizontal",
-  gap = grid::unit(5, "mm")
-)
-
-legend_bottom_68 <- ComplexHeatmap::packLegend(
-  legend_treatment_68,
-  legend_batch_68,
-  direction = "horizontal",
-  gap = grid::unit(5, "mm")
-)
-
-legend_top_grob_68 <- grid::grid.grabExpr(
-  ComplexHeatmap::draw(
-    legend_top_68,
-    x = grid::unit(0.5, "npc"),
-    y = grid::unit(0.5, "npc"),
-    just = c("center", "center")
-  )
-)
-
-legend_bottom_grob_68 <- grid::grid.grabExpr(
-  ComplexHeatmap::draw(
-    legend_bottom_68,
-    x = grid::unit(0.5, "npc"),
-    y = grid::unit(0.5, "npc"),
-    just = c("center", "center")
-  )
-)
-
-# Heatmaps above, horizontal legends below
-fig9E_grob_68 <- gridExtra::arrangeGrob(
-  heatmap_grid_final_68,
-  legend_top_grob_68,
-  legend_bottom_grob_68,
-  ncol = 1,
-  heights = c(8, 1, 1.3)
-)
-
-p9E_final_68 <- patchwork::wrap_elements(
-  full = fig9E_grob_68
-)
-# ============================================================
-# PANEL E: Thin annotation tracks and enlarge JUN heatmap
-# ============================================================
-
-resize_jun_heatmap_68 <- function(gt) {
-
-  layout_names <- gt$layout$name
-
-  # pheatmap gtable rows:
-  # col_annotation = annotation strips
-  # matrix         = JUN abundance row
-  annotation_rows <- which(
-    grepl("col_annotation", layout_names)
-  )
-
-  matrix_rows <- which(
-    layout_names == "matrix"
-  )
-
-  if (length(annotation_rows) > 0) {
-    idx <- unique(gt$layout$t[annotation_rows])
-    gt$heights[idx] <- grid::unit(0.16, "cm")
-  }
-
-  if (length(matrix_rows) > 0) {
-    idx <- unique(gt$layout$t[matrix_rows])
-    gt$heights[idx] <- grid::unit(1.15, "cm")
-  }
-
-  gt
-}
-
-heatmap_grobs_compact_68 <- lapply(
-  heatmap_grobs_68,
-  resize_jun_heatmap_68
-)
-
-heatmap_grid_compact_68 <- gridExtra::arrangeGrob(
-  grobs = heatmap_grobs_compact_68,
-  ncol = 2
-)
-
-# Keep the shared horizontal legends created previously
-fig9E_compact_grob_68 <- gridExtra::arrangeGrob(
-  heatmap_grid_compact_68,
-  legend_top_grob_68,
-  legend_bottom_grob_68,
-  ncol = 1,
-  heights = c(8, 1, 1.3)
-)
-
-p9E_final_68 <- patchwork::wrap_elements(
-  full = fig9E_compact_grob_68
-)
-
-
-# ============================================================
+# =======================================================================
 # F: ROC curves, highest AUC first in bottom-right legend
 # ============================================================
-
-auc_order_68 <- jun_auc_summary_68$Software[
-  order(jun_auc_summary_68$AUC, decreasing = TRUE)
-]
-
-auc_labels_68 <- setNames(
-  sprintf(
-    "%s (%.3f)",
-    jun_auc_summary_68$Software,
-    jun_auc_summary_68$AUC
-  ),
-  jun_auc_summary_68$Software
-)
-
-p9F_final_68 <- p9f_roc_68 +
-  scale_colour_manual(
-    values = software_colors,
-    breaks = auc_order_68,
-    labels = auc_labels_68[auc_order_68]
-  ) +
+p9f <- readRDS("Outputs/jun_roc_68.rds")
+p9F_final_68 <- p9f +
   labs(
     title = NULL,
     subtitle = NULL,
@@ -13026,7 +13221,7 @@ fig9_final_68 <- (
 ) +
   plot_layout(
     widths = c(1, 1),
-    heights = c(1.3, 1.0, 1.4)
+    heights = c(1.3, 1.0, 1.7)
   ) +
   plot_annotation(
     tag_levels = "A"
@@ -13046,10 +13241,11 @@ print(fig9_final_68)
 export_figure(
   fig9_final_68,
   "Figure_9_JUN_Six_Panels_68",
-  width = 10,
-  height = 12
+  width = 12,
+  height = 13
 )
 ```
+
 
 **Figure 9. Cross-pipeline assessment of JUN depletion and genotype discrimination in the 68-run DIA proteomics dataset.**
 
