@@ -951,10 +951,10 @@ combined_qf_files <- setNames(
 
 for (software in software_names) {
   output <- combined_qf_files[[software]]
-  if (file.exists(output)) {
-    message("Already exists, skipping: ", software)
-    next
-  }
+#  if (file.exists(output)) {
+#    message("Already exists, skipping: ", software)
+#    next
+#  }
 
   message("\nProcessing ", software, "...")
   start_time <- Sys.time()
@@ -1373,12 +1373,12 @@ p <- ggplot2::ggplot(density_data,
     linewidth = 0.55, alpha = 0.5) +
   ggplot2::facet_wrap(
     ~ Software, scales = "free", ncol = 2) +
-  ggplot2::geom_rect(
-    data = data.frame(Software = factor("Spectronaut", levels = software_names)),
-    ggplot2::aes(xmin = -1, xmax = 1,
-                 ymin = -Inf, ymax = Inf),
-    inherit.aes = FALSE, fill = "gold", alpha = 0.1,
-    color = "orange3", linewidth = 0.3) +
+#  ggplot2::geom_rect(
+#    data = data.frame(Software = factor("Spectronaut", levels = software_names)),
+#    ggplot2::aes(xmin = -1, xmax = 1,
+#                 ymin = -Inf, ymax = Inf),
+#    inherit.aes = FALSE, fill = "gold", alpha = 0.1,
+#    color = "orange3", linewidth = 0.3) +
   ggplot2::labs(
     title = "Precursor intensity distributions",
     subtitle = "84 LC-MS runs per software; all finite log2 intensities",
@@ -5963,6 +5963,227 @@ print(p_jun)
 
 ```
 
+### - LOBO AUC
+
+```{r}
+rm(list = setdiff(ls(), c("cache_dir", "software_names")))
+software_order <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
+qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_order, "_filtered_final.rds")),
+  software_order
+)
+
+# --- Sample annotations -----------------------------------------------------
+make_metadata <- function(se) {
+  runs <- colnames(se)
+  cd <- as.data.frame(SummarizedExperiment::colData(se))
+  if (!is.null(rownames(cd)) && setequal(rownames(cd), runs)) {
+    cd <- cd[match(runs, rownames(cd)), , drop = FALSE]
+  } else if (nrow(cd) != length(runs)) {
+    stop("colData cannot be aligned with protein-assay run names")
+  }
+  genotype <- if ("genotype" %in% names(cd)) as.character(cd$genotype) else rep(NA_character_, length(runs))
+  missing_geno <- is.na(genotype) | !nzchar(genotype)
+  genotype[missing_geno] <- ifelse(grepl("c-jun_KO", runs[missing_geno], ignore.case = TRUE),
+                                  "KO", ifelse(grepl("CTRL", runs[missing_geno], ignore.case = TRUE),
+                                               "CTRL", NA_character_))
+  genotype <- toupper(genotype)
+  genotype[!genotype %in% c("CTRL", "KO")] <- NA_character_
+
+  treatment <- if ("treatment" %in% names(cd)) as.character(cd$treatment) else ifelse(grepl("cDDP", runs, ignore.case = TRUE), "cDDP", "Untreated")
+  time <- if ("time" %in% names(cd)) as.character(cd$time) else ifelse(grepl("06h", runs, ignore.case = TRUE), "6h", ifelse(grepl("24h", runs, ignore.case = TRUE), "24h", "Baseline"))
+  batch <- ifelse(grepl("^Group[1-4]_", runs), sub("^(Group[1-4])_.*", "\\1", runs),
+                  ifelse(grepl("^20260331_", runs), "20260331", "Unknown"))
+
+  jnk <- grepl("JNK", treatment, ignore.case = TRUE) |
+         grepl("JNK[-_]?IN[-_]?8", runs, ignore.case = TRUE)
+  is_baseline <- !jnk & treatment == "Untreated" & time == "Baseline"
+  is_cddp <- !jnk & treatment == "cDDP" & time %in% c("6h", "24h")
+  condition <- ifelse(is_baseline, "Baseline",
+                      ifelse(is_cddp, paste0("cDDP_", time), NA_character_))
+  data.frame(Run = runs, Genotype = genotype, Batch = batch,
+             Condition = condition, Keep = !is.na(genotype) &
+               !is.na(condition) & batch != "Unknown", stringsAsFactors = FALSE)
+}
+
+# --- Fit treatment-adjusted signature on TRAINING batches only -------------
+train_signature <- function(mat, meta, train_batches,
+                            n_top = 400L,
+                            min_samples_per_genotype = 3L,
+                            min_proteins = 30L) {
+  tr <- which(meta$Keep & meta$Batch %in% train_batches)
+  conditions <- unique(meta$Condition[tr])
+  conditions <- conditions[vapply(conditions, function(cc) {
+    sum(meta$Genotype[tr] == "CTRL" & meta$Condition[tr] == cc) >= 2L &&
+      sum(meta$Genotype[tr] == "KO" & meta$Condition[tr] == cc) >= 2L
+  }, logical(1))]
+  if (!length(conditions)) stop("No conditions with >=2 CTRL and >=2 KO in training batches")
+
+  # For each condition/protein subtract midpoint of training CTRL and KO means.
+  # Held-out values are transformed using TRAINING-derived midpoints only.
+  adj <- matrix(NA_real_, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+  for (cc in conditions) {
+    tctrl <- tr[meta$Condition[tr] == cc & meta$Genotype[tr] == "CTRL"]
+    tko <- tr[meta$Condition[tr] == cc & meta$Genotype[tr] == "KO"]
+    mu_ctrl <- rowMeans(mat[, tctrl, drop = FALSE], na.rm = TRUE)
+    mu_ko <- rowMeans(mat[, tko, drop = FALSE], na.rm = TRUE)
+    midpoint <- (mu_ctrl + mu_ko) / 2
+    idx <- which(meta$Condition == cc)
+    adj[, idx] <- sweep(mat[, idx, drop = FALSE], 1L, midpoint, "-")
+  }
+
+  tr <- tr[meta$Condition[tr] %in% conditions]
+  i_ctrl <- tr[meta$Genotype[tr] == "CTRL"]
+  i_ko <- tr[meta$Genotype[tr] == "KO"]
+  enough <- rowSums(is.finite(adj[, i_ctrl, drop = FALSE])) >= min_samples_per_genotype &
+            rowSums(is.finite(adj[, i_ko, drop = FALSE])) >= min_samples_per_genotype
+
+  mu_ctrl <- rowMeans(adj[, i_ctrl, drop = FALSE], na.rm = TRUE)
+  mu_ko <- rowMeans(adj[, i_ko, drop = FALSE], na.rm = TRUE)
+  sd_train <- apply(adj[, tr, drop = FALSE], 1L, stats::sd, na.rm = TRUE)
+  beta <- (mu_ko - mu_ctrl) / sd_train
+  valid <- which(enough & is.finite(beta) & is.finite(sd_train) & sd_train > 0)
+  if (length(valid) < min_proteins) {
+    stop("Only ", length(valid), " proteins eligible; check batch/condition balance and missingness")
+  }
+  sel <- head(valid[order(abs(beta[valid]), decreasing = TRUE)], n_top)
+  z <- sweep(adj[sel, , drop = FALSE], 1L, sd_train[sel], "/")
+  w <- beta[sel]
+
+  # Score samples without using their genotype labels.
+  score_one <- function(j) {
+    v <- z[, j]
+    good <- is.finite(v) & is.finite(w)
+    if (sum(good) < min_proteins) return(NA_real_)
+    sum(w[good] * v[good]) / sum(abs(w[good]))
+  }
+  scores <- vapply(seq_len(ncol(mat)), score_one, numeric(1))
+  data.frame(meta, SignatureScore = scores,
+             N_reference_proteins = length(sel),
+             stringsAsFactors = FALSE)
+}
+
+# Empirical ROC AUC: KO is positive; direction is fixed before testing.
+auc_ko <- function(scores, genotype) {
+  ko <- scores[genotype == "KO" & is.finite(scores)]
+  ctrl <- scores[genotype == "CTRL" & is.finite(scores)]
+  if (length(ko) < 2L || length(ctrl) < 2L) return(NA_real_)
+  pairwise <- outer(ko, ctrl, "-")
+  (sum(pairwise > 0) + 0.5 * sum(pairwise == 0)) / length(pairwise)
+}
+
+# --- Leave-one-batch-out analysis -------------------------------------
+lobo_list <- list()
+heldout_scores_list <- list()
+metadata_list <- list()
+
+for (software in software_order) {
+  message("\nLOBO: ", software)
+  qf <- readRDS(qf_files[[software]])
+  if (!"proteins" %in% names(qf)) stop(software, ": no 'proteins' assay")
+  se <- qf[["proteins"]]
+  mat <- SummarizedExperiment::assay(se, withDimnames = TRUE)
+  if (!is.matrix(mat)) mat <- as.matrix(mat)
+  stopifnot(is.numeric(mat), !anyDuplicated(colnames(mat)))
+  meta <- make_metadata(se)
+  stopifnot(identical(colnames(mat), meta$Run))
+
+  message("  Eligible samples: ", sum(meta$Keep), "/", ncol(mat))
+  print(with(meta[meta$Keep, , drop = FALSE], table(Batch, Condition, Genotype)))
+  metadata_list[[software]] <- transform(meta, Software = software)
+
+  heldouts <- intersect(c("20260331", "Group1", "Group2", "Group3", "Group4"),
+                        unique(meta$Batch[meta$Keep]))
+  if (length(heldouts) < 2L) stop(software, ": fewer than two eligible batches")
+
+  per_batch <- lapply(heldouts, function(heldout) {
+    train_batches <- setdiff(heldouts, heldout)
+    pred <- tryCatch(
+      train_signature(mat, meta, train_batches),
+      error = function(e) {
+        warning(software, " / held out ", heldout, ": ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (is.null(pred)) return(NULL)
+    test <- pred[pred$Keep & pred$Batch == heldout &
+                   is.finite(pred$SignatureScore), , drop = FALSE]
+    if (!nrow(test)) return(NULL)
+
+    has_both <- all(c("CTRL", "KO") %in% test$Genotype)
+    summary_row <- data.frame(
+      Software = software,
+      Batch = heldout,
+      N_CTRL = sum(test$Genotype == "CTRL"),
+      N_KO = sum(test$Genotype == "KO"),
+      N_reference_proteins = unique(test$N_reference_proteins)[1L],
+      AUC = auc_ko(test$SignatureScore, test$Genotype),
+      Median_separation = if (has_both) {
+        median(test$SignatureScore[test$Genotype == "KO"]) -
+          median(test$SignatureScore[test$Genotype == "CTRL"])
+      } else NA_real_
+    )
+    test$Software <- software
+    test$Held_out_batch <- heldout
+    
+    list(
+      summary = summary_row,
+      samples = test
+    )
+  })
+  lobo_list[[software]] <- dplyr::bind_rows(
+    lapply(per_batch, function(x) if (!is.null(x)) x$summary)
+  )
+  heldout_scores_list[[software]] <- dplyr::bind_rows(
+    lapply(per_batch, function(x) if (!is.null(x)) x$samples)
+  )
+  rm(qf, se, mat, meta, per_batch)
+  invisible(gc(verbose = FALSE))
+}
+
+lobo_data <- dplyr::bind_rows(lobo_list)
+print(lobo_data, row.names = FALSE)
+
+# --- PLOT --------------------------------------------------------
+batch_levels <- c("Group1", "Group2", "Group3", "Group4", "20260331")
+lobo_data$Software <- factor(lobo_data$Software, levels = software_order,
+                           labels = c("AlphaDIA", "DIA-NN", "Spectronaut", "MaxDIA"))
+lobo_data$Batch <- factor(lobo_data$Batch, levels = rev(batch_levels))
+
+p_lobo_auc <- ggplot2::ggplot(
+  lobo_data[is.finite(lobo_data$AUC), ],
+  ggplot2::aes(y = Batch, x = AUC)) +
+  geom_col(aes(fill = Batch), width = .5, show.legend = F)+
+  ggplot2::geom_vline(xintercept = 0.5, linetype = "dashed", color = "grey45") +
+  ggplot2::facet_wrap(~ Software, ncol = 2) +
+  ggplot2::scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.25)) +
+  ggplot2::labs(
+    title = "Leave-one-batch-out genotype classification",
+    subtitle = "Higher scores indicate KO",
+    y = "Held-out acquisition batch",
+    x = "Held-out ROC AUC"
+  ) +
+  ggplot2::theme_bw(base_size = 11) +
+  ggplot2::theme(
+    strip.text = ggplot2::element_text(face = "bold"),
+    axis.title = ggplot2::element_text(face = "bold"),
+    axis.text = ggplot2::element_text(size = 13),
+    panel.spacing.x = unit(0.5, "cm")
+  )
+
+
+print(p_lobo_auc)
+
+ggplot2::ggsave(
+  "Outputs/p_lobo_auc.pdf",
+  plot = p_lobo_auc, width = 7, height = 5, bg = "white",
+  device = grDevices::cairo_pdf
+)
+
+saveRDS(p_lobo_auc, "Outputs/p_lobo_auc.rds")
+
+```
+
 
 ## 19. Filtering out Group4 batch
 
@@ -6353,7 +6574,7 @@ p_precursor_coverage_68 <- ggplot(
     y = "Precursors per protein"
   ) +
   
-  theme_minimal(base_size = 12) +
+  theme_bw(base_size = 12) +
   theme(
     plot.title = element_text(face = "bold", size = 15),
     legend.position = "none",
@@ -6573,7 +6794,7 @@ potein_mds_batch_68 <- ggplot2::ggplot(
 #    subtitle = "68 retained runs across four acquisition batches",
     x = "MDS dimension 1",
     y = "MDS dimension 2",
-    color = "Acquisition batch"
+    color = "Batch"
   ) +
   ggplot2::theme_classic(base_size = 12) +
   ggplot2::theme(
@@ -9807,7 +10028,7 @@ p_sigma_68 <- ggplot(
       "matched protein groups"
     ),
     x = NULL,
-    y = "Residual standard deviation, sigma (log10 scale)"
+    y = "Residual standard deviation, \nsigma (log10 scale)"
   ) +
   theme_minimal(base_size = 13) +
   theme(
@@ -12733,10 +12954,11 @@ saveRDS(jun_heatmap_68, paste0("Outputs/jun_heatmap_68.rds"))
 # Publication-ready multipanel figures
 
 ```{r manuscript_export_setup, eval=FALSE}
+cache_dir <- "~/Desktop/proj/MsProteomics/Data_4groups/R_cache"
 rm(list = setdiff(ls(), c("cache_dir")))
 invisible(gc(verbose = FALSE))
 
-mainFigs_dir <- "Manuscript/Main_figures"
+mainFigs_dir <- "Manuscript"
 #plot_backup_dir <- file.path(cache_dir, "manuscript_plot_objects")
 #results_dir <- file.path(cache_dir, "statistical_results")
 
@@ -12778,19 +13000,45 @@ invisible(gc(verbose = FALSE))
 p2a <- readRDS("Outputs/p_upset_precursors_68.rds")
 p2b <- readRDS("Outputs/p_upset_identification_68.rds")
 p2c <- readRDS("Outputs/p_precursor_coverage_68.rds")
+p2d <- readRDS("Outputs/Precursor_84_distributions_highlighted_outlire.rds")
+p2e <- readRDS("Outputs/p1_pooled_precursor_After_normalization.rds")
+p2f <- readRDS("Outputs/p2_pooled_protein_After_normalization.rds")
 
+# Convert UpSetR plots to grid grobs
+p2a_grob <- grid::grid.grabExpr(
+  print(p2a),
+  wrap = TRUE
+)
+
+p2b_grob <- grid::grid.grabExpr(
+  print(p2b),
+  wrap = TRUE
+)
 
 fig2 <- (
-  wrap_elements(full = p2a) /
-  wrap_elements(full = p2b) /
-  wrap_elements(full = p2c)) +
-  plot_layout(heights = c(1.5, 1.5, 1.5)) +
+  (wrap_elements(full = p2a_grob) |
+   wrap_elements(full = p2b_grob)) /
+
+  ((p2c + theme_bw(base_size = 12) + 
+      theme(legend.position = "none",
+            plot.title = element_text(face = "bold", size = 17))) |
+   (p2d + theme(plot.subtitle = element_blank(),
+                plot.title = element_text(face = "bold", size = 17)))) /
+
+  ((p2e + theme(plot.subtitle = element_blank())) |
+   (p2f + theme(plot.subtitle = element_blank())))
+) +
+  plot_layout(
+    widths = c(1, 1),
+    heights = c(2, 1.3, 1.3)
+  ) +
   plot_annotation(tag_levels = "A") &
   theme(
     plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(fig2, "Figure_2_Identification", 7, 13)
+
+export_figure(fig2, "Figure_2_Identification", 13, 14)
 
 print(fig2)
 ```
@@ -12885,15 +13133,28 @@ invisible(gc(verbose = FALSE))
 p5a <- clean_panel(readRDS("Outputs/potein_mds_condition_68.rds"))
 p5b <- clean_panel(readRDS("Outputs/potein_mds_batch_68.rds"))
 p5c <- clean_panel(readRDS("Outputs/p_sigma_68.rds"))
-p5d <- clean_panel(readRDS("Outputs/p_abundance_precision_68.rds"))
+p5d <- clean_panel(readRDS("Outputs/p_abundance_precision_68.rds"))+
+  guides(color = guide_legend(nrow = 2, byrow = TRUE)) +
+  theme(
+    legend.text = ggplot2::element_text(size = 10),
+    legend.position = "inside",
+    legend.position.inside = c(0.98, 0.65),
+    legend.justification = c(1, 0),
+    legend.direction = "horizontal",
+    legend.background = element_rect(fill = "white", color = "grey75", linewidth = 0.4),
+    legend.key = element_rect(fill = "white"),
+    legend.title = element_blank())
 
-fig5 <- (p5a | p5b) / (p5c | p5d) +
+
+
+fig5 <- (p5a | p5b) / 
+  (p5c | p5d) +
   plot_annotation(tag_levels = "A")&
   theme(
     plot.tag = element_text(size = 22, face = "bold")
   )
 
-export_figure(fig5, "Figure_5_Reproducibility_Precision", 14, 10)
+export_figure(fig5, "Figure_5_Reproducibility_Precision", 13, 10)
 print(fig5)
 ```
 
