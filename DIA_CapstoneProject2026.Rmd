@@ -1562,6 +1562,7 @@ saveRDS(qf_spectro, combined_qf_files[["Spectronaut"]])
 
 plot(qf_spectro)
 ```
+
 ## *** Removing outlier
 One LC-MS run (Group1_c-jun_KO_1) exhibited an atypical precursor intensity distribution across multiple DIA analysis pipelines, most prominently in AlphaDIA and DIA-NN. Given the consistency of this observation across software tools and the availability of additional replicates for the corresponding condition, the run was excluded from downstream quantitative analysis. Normalization was subsequently recalculated using the remaining 83 runs.
 
@@ -1614,6 +1615,10 @@ for (software in software_names) {
 # Proteotypic status cannot yet be verified for AlphaDIA
 # and Spectronaut using their current combined rowData.
 # ============================================================
+combined_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_combined.rds")),
+  software_names
+)
 rm(list = setdiff(ls(), c("cache_dir", "software_names", "combined_qf_files")))
 invisible(gc(verbose = FALSE))
 
@@ -2016,284 +2021,9 @@ print(normalization_summary)
 
 ```
 
-## 11. Before&After norm
-
-```{r evaluate_precursor_normalization, eval=FALSE, fig.width=14, fig.height=10, message=FALSE, warning=FALSE}
-
-# ============================================================
-# Evaluate Median of Ratios normalization
-# Four DIA software packages, 84 runs each
-# ============================================================
-rm(list = setdiff(ls(), c("cache_dir", "software_names")))
-invisible(gc(verbose = FALSE))
-
-filtered_qf_files <- setNames(
-  file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
-  software_names
-)
-
-density_list <- list()
-median_list <- list()
-
-for (software in software_names) {
-
-  cat("\nProcessing normalization QC: ", software, "...\n", sep = "")
-  qf_one <- readRDS(filtered_qf_files[[software]])
-
-  se_before <- qf_one[["precursors_log"]]
-  se_after  <- qf_one[["precursors_norm"]]
-  
-  before <- SummarizedExperiment::assay(se_before, withDimnames = FALSE)
-  after <- SummarizedExperiment::assay(se_after, withDimnames = FALSE)
-
-  runs <- colnames(se_before)
-
-  batch <- dplyr::case_when(
-    grepl("^Group1_", runs) ~ "Group 1",
-    grepl("^Group2_", runs) ~ "Group 2",
-    grepl("^Group3_", runs) ~ "Group 3",
-    grepl("^Group4_", runs) ~ "Group 4",
-    grepl("^20260331_", runs) ~ "20260331",
-    TRUE ~ "Unknown"
-  )
-
-  # ----------------------------------------------------------
-  # Run-level medians and densities using ALL intensitiess
-  # ----------------------------------------------------------
-
-  median_before <- rep(NA_real_, length(runs))
-  median_after  <- rep(NA_real_, length(runs))
-
-  run_densities <- vector("list", length(runs) * 2L)
-  
-  for (j in seq_along(runs)) {
-    # Extract all finite intensities for this run
-    x_before <- before[, j]
-    x_before <- x_before[is.finite(x_before)]
-
-    x_after <- after[, j]
-    x_after <- x_after[is.finite(x_after)]
-
-    # Run-level medians
-    if (length(x_before)) {
-      median_before[j] <- median(x_before)
-    }
-
-    if (length(x_after)) {
-      median_after[j] <- median(x_after)
-    }
-
-    # Calculate KDE for each normalization stage
-    for (stage in c("Before", "After")) {
-
-      values <- if (stage == "Before") x_before else x_after
-
-      if (length(values) < 2L || min(values) == max(values)) {
-        next
-      }
-
-      den <- stats::density(
-        values,
-        n = 512L,
-        na.rm = TRUE
-      )
-
-      idx <- (j - 1L) * 2L +
-        if (stage == "Before") 1L else 2L
-
-      run_densities[[idx]] <- data.frame(
-        Software = software,
-        Run = runs[j],
-        Stage = stage,
-        Log2_Intensity = den$x,
-        Density = den$y
-      )
-    }
-  }
-  
-  median_list[[software]] <- data.frame(
-    Software = software,
-    Run = runs,
-    Batch = batch,
-    Before = as.numeric(median_before),
-    After = as.numeric(median_after)
-  )
-
-  # Store density coordinates (not raw intensities)
-  density_list[[software]] <- dplyr::bind_rows(run_densities)
-
-  cat( software, ": ", length(runs), " runs; ",
-       nrow(density_list[[software]]), " density coordinates\n", sep = "")
-
-  rm(qf_one, se_before, se_after, before, after,
-     run_densities, x_before, x_after, values, den)
-  
-  invisible(gc(verbose = FALSE))
-}
-
-# ============================================================
-# Prepare plotting data
-# ============================================================
-
-density_qc <- dplyr::bind_rows(density_list) 
-
-median_qc_norm <- dplyr::bind_rows(median_list) |>
-  tidyr::pivot_longer(
-    cols = c(Before, After),
-    names_to = "Stage",
-    values_to = "Median_Log2"
-  )
-
-software_order <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
-
-batch_order <- c(
-  "Group 1", "Group 2", "Group 3",
-  "Group 4", "20260331", "Unknown"
-)
-
-density_qc$Software <- factor(
-  density_qc$Software,
-  levels = software_order
-)
-
-median_qc_norm$Software <- factor(
-  median_qc_norm$Software,
-  levels = software_order
-)
-
-density_qc$Stage <- factor(
-  density_qc$Stage,
-  levels = c("Before", "After")
-)
-
-median_qc_norm$Stage <- factor(
-  median_qc_norm$Stage,
-  levels = c("Before", "After")
-)
-
-median_qc_norm$Batch <- factor(
-  median_qc_norm$Batch,
-  levels = batch_order
-)
-
-# ============================================================
-# Plot 1: Full-data density before vs. after normalization
-# ============================================================
-
-p_density <- ggplot2::ggplot(
-  density_qc,
-  ggplot2::aes(
-    x = Log2_Intensity,
-    y = Density,
-    group = interaction(Software, Run, Stage),
-    color = Software
-  )
-) +
-  ggplot2::geom_line(
-    linewidth = 0.35,
-    alpha = 0.55
-  ) +
-  ggplot2::facet_grid(
-    . ~ Stage,
-    scales = "free_y"
-  ) +
-  scale_color_manual(values = c(
-  "AlphaDIA" = "#0072B2", "DIANN" = "#E69F00",
-  "Spectronaut" = "#009E73", "MaxDIA" = "#CC79A7"))+
-  ggplot2::labs(
-    title = "Precursor intensity distributions before and after normalization",
-    subtitle = "84 runs per software; all finite precursor intensities",
-    x = "Log2 precursor intensity",
-    y = "Density"
-  ) +
-  ggplot2::theme_classic(base_size = 12) +
-  ggplot2::theme(
-    legend.position = 'top',
-    legend.title = element_blank(),
-    plot.title = ggplot2::element_text(face = "bold"),
-    strip.text = ggplot2::element_text(face = "bold")
-  )
-
-print(p_density)
-
-ggsave("Outputs/Precursor_intensity_distributions_BeforeAfter_normalization.pdf",
-  plot = p_density,
-  width = 7,
-  height = 5.5,
-  dpi = 300,
-  bg = "white"
-)
-saveRDS(p_density, "Outputs/Precursor_intensity_distributions_BeforeAfter_normalization.rds")
-
-# ============================================================
-# Plot 2: Median intensity by batch before vs. after
-# ============================================================
-
-p_median <- ggplot2::ggplot(
-  median_qc_norm,
-  ggplot2::aes(
-    x = Stage,
-    y = Median_Log2,
-    fill = Stage
-  )
-) +
-  ggplot2::geom_boxplot(
-    width = 0.65,
-    alpha = 0.35,
-    outlier.shape = NA
-  ) +
-  ggplot2::geom_jitter(
-    width = 0.15,
-    height = 0,
-    size = 1.5,
-    alpha = 0.75
-  ) +
-  ggplot2::facet_grid(
-    Software ~ Batch,
-    scales = "free_y"
-  ) +
-  ggplot2::labs(
-    title = "Run-level median intensity by acquisition batch",
-    subtitle = "Before versus after Median of Ratios normalization",
-    x = "Acquisition batch",
-    y = "Median log2 precursor intensity"
-  ) +
-  ggplot2::theme_classic(base_size = 12) +
-  ggplot2::theme(
-    plot.title = ggplot2::element_text(face = "bold"),
-    strip.text = ggplot2::element_text(face = "bold"),
-    axis.text.x = ggplot2::element_blank(),
-    legend.position = "top")
-
-print(p_median)
-
-# ============================================================
-# Numerical evaluation: run-to-run median variability
-# ============================================================
-
-normalization_qc_summary <- median_qc_norm |>
-  dplyr::group_by(Software, Stage) |>
-  dplyr::summarise(
-    N_Runs = sum(is.finite(Median_Log2)),
-    SD_Run_Medians = sd(Median_Log2, na.rm = TRUE),
-    IQR_Run_Medians = IQR(Median_Log2, na.rm = TRUE),
-    Range_Run_Medians = diff(
-      range(Median_Log2, na.rm = TRUE)
-    ),
-    .groups = "drop"
-  )
-
-print(normalization_qc_summary)
-
-# Remove large temporary plotting data
-rm(density_list, median_list, density_qc)
-gc(verbose = FALSE)
-```
-
-
 The results strengthen the justification for excluding Group1_c-jun_KO_1, particularly for DIA-NN and MaxDIA.
 
-## 12. Aggregation
+## 11. Aggregation
 The objective of aggregation is to summarise the precursor-level intensities into a protein expression value. The fact that different precursors have different intensities (2.), may be inconsistently identified (3.) and/or quantified (4.), and show sample correlations (5.) can lead to bias if we use simple summarisation approaches such as summing or averaging the precursor intensities for each sample. Instead, we will resort to more advanced summarisation approaches to accommodate for these issues. Here, we summarise the precursor-level data into protein intensities usin`g maxLFQ`. It is implemented in the `maxLFQ` function of the `iq` package.
 
 ```{r protein_aggregation_maxlfq, message=FALSE, eval=run_analysis}
@@ -2378,105 +2108,336 @@ print(aggregation_summary)
 
 ```
 
-## 13. Density protein
 
-```{r protein_aggregation_density, eval=FALSE, fig.width=14, fig.height=9, message=FALSE, warning=FALSE}
+## 12. Before&After norm
+
+```{r evaluate_precursor_normalization, eval=FALSE, fig.width=14, fig.height=10, message=FALSE, warning=FALSE}
 # ============================================================
-# Protein-level intensity density plots
-# Four DIA software packages
+# Evaluate Median of Ratios normalization
+# Four DIA software packages, 84 runs each
 # ============================================================
 rm(list = setdiff(ls(), c("cache_dir", "software_names")))
 invisible(gc(verbose = FALSE))
 
+
+combined_qf_files <- setNames(
+  file.path(cache_dir, paste0("qf_", software_names, "_combined.rds")),
+  software_names
+)
 filtered_qf_files <- setNames(
   file.path(cache_dir, paste0("qf_", software_names, "_filtered_final.rds")),
   software_names
 )
 
 
-density_data <- list()
-
-for (software in software_names) {
-
-  cat("\nCalculating densities for ", software, "...\n", sep = "")
-  
-  # Load existing filtered QFeatures
-  qf_one <- readRDS(filtered_qf_files[[software]])
-  
-  se <- qf_one[["proteins"]]
-  x <- SummarizedExperiment::assay(se, withDimnames = FALSE)
-
-  # Calculate density separately for each run
-  run_densities <- lapply(seq_len(ncol(x)), function(j) {
-
-    values <- x[, j]
-    values <- values[is.finite(values)]
-
-    if (length(values) < 2L ||
-        min(values) == max(values)) {
-      return(NULL)
-    }
-    
-    den <- stats::density(
-      values,
-      n = 512L,
-      na.rm = TRUE
+software_order <- c("AlphaDIA", "DIANN", "Spectronaut", "MaxDIA")
+software_colors <- c(
+  AlphaDIA = "#0072B2", DIANN = "#E69F00",
+  Spectronaut = "#009E73", MaxDIA = "#CC79A7"
+)
+# -----------------------------------
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+get_mat <- function(se, runs = NULL) {
+  mat <- SummarizedExperiment::assay(se, withDimnames = TRUE)
+  if (!is.matrix(mat)) mat <- as.matrix(mat)
+  if (!is.null(runs)) {
+    stopifnot(
+      !anyDuplicated(colnames(mat)),
+      setequal(colnames(mat), runs)
     )
-  
+    mat <- mat[, runs, drop = FALSE]
+  }
+  mat
+}
+
+run_medians <- function(mat) {
+  vapply(seq_len(ncol(mat)), function(j) {
+    x <- mat[, j]
+    x <- x[is.finite(x)]
+    if (!length(x)) return(NA_real_)
+    stats::median(x)
+  }, numeric(1))
+}
+
+run_kdes <- function(mat, software, stage) {
+  curves <- lapply(seq_len(ncol(mat)), function(j) {
+    x <- mat[, j]
+    x <- x[is.finite(x)]
+    if (length(x) < 2L || min(x) == max(x)) return(NULL)
+
+    den <- stats::density(x, n = 512L)
     data.frame(
       Software = software,
-      Run = colnames(se)[j],
+      Run = colnames(mat)[j],
+      Stage = stage,
       Log2_Intensity = den$x,
       Density = den$y
     )
   })
-  
-    density_data[[software]] <- dplyr::bind_rows(run_densities)
-
-    cat(software, ": ", ncol(se), " runs; ",
-        nrow(density_data[[software]]), " density coordinates\n", sep = "")
-    
-    rm(qf_one, se, x, run_densities)
-    invisible(gc(verbose = FALSE))
+  dplyr::bind_rows(curves)
 }
 
-density_data <- dplyr::bind_rows(density_data) %>%
-  mutate(Software = factor(Software, levels = software_names))
+pooled_kde <- function(mat, software) {
+  # Pool OBSERVED intensities, not the already-estimated run KDEs.
+  x <- mat[is.finite(mat)]
+  if (length(x) < 2L || min(x) == max(x)) return(NULL)
 
-# Plot all 84 run distributions for each software
-p <- ggplot2::ggplot(density_data,
-  ggplot2::aes(x = Log2_Intensity, y = Density, color = Software,
-               group = interaction(Software, Run))) +
+  den <- stats::density(x, n = 512L)
+  data.frame(
+    Software = software,
+    N_intensities = length(x),
+    Log2_Intensity = den$x,
+    Density = den$y
+  )
+}
+
+# ------------------------------------------------------------
+# Extract the information for all four figures
+# ------------------------------------------------------------
+precursor_run_density_list <- list()
+pooled_precursor_density_list <- list()
+pooled_protein_density_list <- list()
+median_list <- list()
+
+for (software in software_order) {
+  message("\nQC for: ", software)
+
+  # BEFORE: all precursor features before filtering and normalization.
+  qf_before <- readRDS(combined_qf_files[[software]])
+
+  mat_before <- get_mat(qf_before[["precursors_log"]])
+  runs <- colnames(mat_before)
+
+  med_before <- run_medians(mat_before)
+  prec_before_kdes <- run_kdes(mat_before, software, "Before")
+  n_before <- nrow(mat_before)
+
+  rm(qf_before, mat_before)
+  invisible(gc(verbose = FALSE))
+
+  # FILTERED / AFTER: same filtered precursor set, before/after normalization.
+  qf_after <- readRDS(filtered_qf_files[[software]])
+
+  mat_filtered <- get_mat(qf_after[["precursors_log"]], runs)
+  mat_norm <- get_mat(qf_after[["precursors_norm"]], runs)
+
+  med_filtered <- run_medians(mat_filtered)
+  med_norm <- run_medians(mat_norm)
+  prec_after_kdes <- run_kdes(mat_norm, software, "After")
+  pooled_precursor_density_list[[software]] <- pooled_kde(mat_norm, software)
+
+  # Existing protein assay: final aggregated protein abundance.
+  # No protein-level BEFORE matrix and no per-run protein KDE are needed.
+  mat_protein <- get_mat(qf_after[["proteins"]], runs)
+  pooled_protein_density_list[[software]] <- pooled_kde(mat_protein, software)
+
+  precursor_run_density_list[[software]] <- dplyr::bind_rows(
+    prec_before_kdes, prec_after_kdes)
+  
+  median_list[[software]] <- data.frame(
+    Software = software,
+    Run = runs,
+    Unfiltered = med_before,
+    Filtered = med_filtered,
+    Normalized = med_norm
+  )
+
+  message("  ", length(runs), " runs; ", n_before,
+          " unfiltered precursors; ", nrow(mat_norm),
+          " filtered precursors; ", nrow(mat_protein),
+          " protein groups")
+
+  rm(qf_after, mat_filtered, mat_norm, mat_protein,
+     prec_before_kdes, prec_after_kdes,
+     med_before, med_filtered, med_norm)
+  invisible(gc(verbose = FALSE))
+}
+
+# ------------------------------------------------------------
+# Plotting data
+# ------------------------------------------------------------
+pooled_precursor_density_df <- dplyr::bind_rows(pooled_precursor_density_list)
+pooled_protein_density_df <- dplyr::bind_rows(pooled_protein_density_list)
+precursor_run_density_df <- dplyr::bind_rows(precursor_run_density_list)
+median_wide <- dplyr::bind_rows(median_list)
+
+pooled_precursor_density_df$Software <- factor(
+  pooled_precursor_density_df$Software, levels = software_order)
+pooled_protein_density_df$Software <- factor(
+  pooled_protein_density_df$Software, levels = software_order)
+precursor_run_density_df$Software <- factor(
+  precursor_run_density_df$Software, levels = software_order)
+precursor_run_density_df$Stage <- factor(
+  precursor_run_density_df$Stage, levels = c("Before", "After"))
+
+median_qc <- median_wide |>
+  tidyr::pivot_longer(
+    cols = c(Unfiltered, Filtered, Normalized),
+    names_to = "Stage",
+    values_to = "Median_Log2"
+  ) |>
+  dplyr::mutate(
+    Software = factor(Software, levels = software_order),
+    Stage = factor(Stage,
+                   levels = c("Unfiltered", "Filtered", "Normalized"))
+  )
+
+# ------------------------------------------------------------
+# Shared plotting helper: pooled densities
+# ------------------------------------------------------------
+plot_pooled <- function(dat, level) {
+  ggplot2::ggplot(dat, ggplot2::aes(
+    x = Log2_Intensity,
+    y = Density,
+    color = Software,
+    fill = Software,
+    group = Software
+  )) +
+    ggplot2::geom_area(position = "identity", alpha = 0.16, color = NA) +
+    ggplot2::geom_line(linewidth = 0.80) +
+    ggplot2::scale_color_manual(values = software_colors) +
+    ggplot2::scale_fill_manual(values = software_colors) +
+    ggplot2::labs(
+      title = paste0(level, " intensity distributions \nafter filtering and normalization"),
+      subtitle = "Pooled finite abundances across 83 LC-MS runs per pipeline",
+      x = paste0("Log2 ", tolower(level), " abundance"),
+      y = "Density", color = NULL, fill = NULL
+    ) +
+    ggplot2::theme_classic(base_size = 12, base_family = "DejaVu Sans") +
+    ggplot2::theme(
+      legend.position = "top",
+      plot.title = ggplot2::element_text(face = "bold")
+    )
+}
+
+# ============================================================
+# FIGURE 1 — MAIN: pooled normalized precursor intensities
+# ============================================================
+p1_pooled_precursor_After_normalization <- plot_pooled(
+  pooled_precursor_density_df, "Precursor")
+
+ggsave("Outputs/p1_pooled_precursor_After_normalization.pdf",
+  plot = p1_pooled_precursor_After_normalization,
+  width = 7,
+  height = 5.5,
+  device = grDevices::cairo_pdf,
+  dpi = 300,
+  bg = "white")
+
+saveRDS(p1_pooled_precursor_After_normalization,
+        "Outputs/p1_pooled_precursor_After_normalization.rds")
+# ============================================================
+# FIGURE 2 — MAIN: pooled final protein abundances
+# ============================================================
+p2_pooled_protein_After_normalization <- plot_pooled(
+  pooled_protein_density_df, "Protein")
+
+
+ggsave("Outputs/p2_pooled_protein_After_normalization.pdf",
+  plot = p2_pooled_protein_After_normalization,
+  width = 7,
+  height = 5.5,
+  device = grDevices::cairo_pdf,
+  dpi = 300,
+  bg = "white")
+
+saveRDS(p2_pooled_protein_After_normalization,
+        "Outputs/p2_pooled_protein_After_normalization.rds")
+# ============================================================
+# FIGURE 3 — SUPPLEMENTARY: run-level median across three stages
+# ============================================================
+p3_three_stage_medians <- ggplot2::ggplot(
+  median_qc,
+  ggplot2::aes(x = Stage, y = Median_Log2)
+) +
   ggplot2::geom_line(
-    linewidth = 0.35, alpha = 0.3) +
-  scale_color_manual(values = c(
-  "AlphaDIA" = "#0072B2", "DIANN" = "#E69F00",
-  "Spectronaut" = "#009E73", "MaxDIA" = "#CC79A7"))+
+    ggplot2::aes(group = Run),
+    color = "grey70", alpha = 0.2, linewidth = 0.3
+  ) +
+  ggplot2::geom_boxplot(
+    ggplot2::aes(fill = Stage),
+    width = 0.45, alpha = 0.50, outlier.shape = NA
+  ) +
+  ggplot2::geom_point(
+    ggplot2::aes(fill = Stage),
+    position = ggplot2::position_jitter(width = 0.1, height = 0),
+    size = 2, alpha = 0.55, shape = 21
+  ) +
+  ggplot2::facet_wrap(~ Software, scales = "free_y", ncol = 2) +
+  ggplot2::scale_fill_manual(values = c(
+    Unfiltered = "#D55E00", Filtered = "#E69F00",
+    Normalized = "#0072B2"
+  )) +
   ggplot2::labs(
-    title = "Protein-level intensity distributions after MaxLFQ aggregation",
-    subtitle = "83 LC-MS runs per software",
-    x = "Normalized log2 protein intensity", y = "Density") +
-  ggplot2::theme_classic(base_size = 12) +
+    title = "Run-level median precursor intensities across preprocessing",
+    subtitle = "83 matched LC-MS runs per pipeline",
+    x = NULL, y = "Median log2 precursor intensity"
+  ) +
+  ggplot2::theme_bw(base_size = 12, base_family = "DejaVu Sans") +
   ggplot2::theme(
-    legend.position = 'top',
-    legend.title = element_blank(),
+    legend.position = "none",
     strip.text = ggplot2::element_text(face = "bold"),
     plot.title = ggplot2::element_text(face = "bold")
   )
 
 
-ggplot2::ggsave(
-  "Outputs/Protein_density.pdf",
-  plot = p,
+ggsave("Outputs/p3_three_stage_medians.pdf",
+  plot = p3_three_stage_medians,
+  width = 8,
+  height = 5.5,
+  device = grDevices::cairo_pdf,
+  dpi = 300,
+  bg = "white")
+
+saveRDS(p3_three_stage_medians,
+        "Outputs/p3_three_stage_medians.rds")
+# ============================================================
+# FIGURE 4 — SUPPLEMENTARY: individual-run precursor densities
+# ============================================================
+p4_precursor_runs <- ggplot2::ggplot(
+  precursor_run_density_df,
+  ggplot2::aes(
+    x = Log2_Intensity,
+    y = Density,
+    color = Software,
+    group = interaction(Software, Run, Stage)
+  )
+) +
+  ggplot2::geom_line(linewidth = 0.30, alpha = 0.25) +
+  ggplot2::facet_grid(. ~ Stage) +
+  ggplot2::scale_color_manual(values = software_colors) +
+  ggplot2::labs(
+    title = "Run-level precursor intensity distributions",
+    subtitle = paste(
+      "Before precursor filtering and normalization versus after both;",
+      "\n83 runs per pipeline"
+    ),
+    x = "Log2 precursor intensity", y = "Density", color = NULL
+  ) +
+  ggplot2::theme_classic(base_size = 12, base_family = "DejaVu Sans") +
+  ggplot2::theme(
+    legend.position = "top",
+    strip.text = ggplot2::element_text(face = "bold"),
+    plot.title = ggplot2::element_text(face = "bold")
+  )
+# ----------------------------
+ggsave("Outputs/Precursor_intensity_distributions_BeforeAfter_normalization.pdf",
+  plot = p4_precursor_runs,
   width = 7,
-  height = 5,
+  height = 5.5,
+  device = grDevices::cairo_pdf,
+  dpi = 300,
   bg = "white"
 )
-saveRDS(p, "Outputs/Protein_density.rds")
+saveRDS(p4_precursor_runs,
+        "Outputs/Precursor_intensity_distributions_BeforeAfter_normalization.rds")
 
-print(p)
 gc(verbose = FALSE)
 ```
+
+
 Overall, MaxLFQ aggregation produced reasonably consistent protein-level intensity distributions across the 83 runs in all four software packages.
 - AlphaDIA: Narrow, closely overlapping distributions, indicating good run-to-run consistency.
 - DIA-NN: Broader distributions with slightly more variability, but generally good overlap.
