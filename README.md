@@ -3,7 +3,6 @@
 A comparative benchmark of **AlphaDIA, DIA-NN, Spectronaut and MaxDIA** using a common data-independent acquisition (DIA) proteomics dataset. This repository accompanies the MSProt 2026 capstone research project and provides the downstream statistical analysis, harmonized analysis guidelines, quality-control results and publication-ready figures.
 
 The central objective is to evaluate DIA pipelines not only by the number of identified precursors and proteins, but also by the completeness, reproducibility, precision and biological interpretability of their quantitative measurements.
-<img width="3000" height="2100" alt="Fig1" src="https://github.com/user-attachments/assets/f0c5c719-dc66-4f85-bafd-f04ca6094b21" />
 
 **Start here:** [Full analysis report (PDF)](DIA_CapstoneProject2026.pdf) · [Analysis source (R Markdown)](DIA_CapstoneProject2026.Rmd) · [Publication figures](Manuscript/) · [R session information](R_session_info.txt)
 
