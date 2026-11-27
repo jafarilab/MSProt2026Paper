@@ -7346,7 +7346,7 @@ saveRDS(qf_models_83,
 ```
 Nine of the eleven contrasts have direct within-batch support. These should be the primary focus of your differential abundance analysis.
 
-The two 24 h versus 6 h comparisons are mathematically estimable but have no shared acquisition batches. Their estimates depend on the additive batch-effect assumption and the untreated samples that connect batches. I recommend treating these as exploratory rather than primary contrasts.
+The two 24 h versus 6 h comparisons are mathematically estimable but have no shared acquisition batches. Their estimates depend on the additive batch-effect assumption and the untreated samples that connect batches. I  treat these as exploratory rather than primary contrasts.
 
 Although the overall design supports these contrasts, individual proteins may have missing observations. A protein measured only in certain batches or conditions may not support every contrast, even when the overall design matrix is full rank.
 
@@ -7845,7 +7845,7 @@ MaxDIA	99.94–99.99%	Nearly complete
 
 This is particularly reassuring because the 6-hour treatment groups contain only six replicates each.
 
-Although the 6 h and 24 h conditions do not share batches, untreated samples connect the groups statistically. Therefore, their contrasts can be estimable under the additive model. But they rely more strongly on assumptions about batch effects. I recommend keeping these two time comparisons as exploratory analyses.
+Although the 6 h and 24 h conditions do not share batches, untreated samples connect the groups statistically. Therefore, their contrasts can be estimable under the additive model. But they rely more strongly on assumptions about batch effects. I keep these two time comparisons as exploratory analyses.
 
 
 In other word, Protein-level data availability was high across all four DIA analysis pipelines. Between 97.9% and 100% of quantified proteins had at least two observations in each condition for the planned contrasts. Nine of the eleven comparisons had direct within-batch support, whereas comparisons between 6-hour and 24-hour cisplatin treatments lacked overlapping acquisition batches. Although these time-point contrasts were mathematically estimable under the additive batch-adjusted design, their interpretation requires caution because treatment duration and acquisition batch were partially confounded. Overall, the results support proceeding with batch-adjusted differential abundance modeling without additional global completeness filtering.
