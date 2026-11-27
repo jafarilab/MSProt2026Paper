@@ -1,0 +1,203 @@
+---
+title: "Capstone Project: DIA Proteomics Analysis"
+author: "Course Team"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Overview
+
+In this capstone project, each student team will analyze DIA (Data-Independent Acquisition) proteomics data. The objective is to perform protein identification using assigned tools and ensure proper data annotation, reproducibility, and standardized data sharing.
+
+---
+
+# Data Distribution
+
+## DIA Data
+- The dataset consists of **84 DIA files in `.mzML` format**
+- Files will be shared via:
+  - External hard drive **or**
+  - https://filesender.funet.fi/
+
+## Protein Database
+- FASTA files (target + contaminants) are provided via the project GitHub repository
+
+---
+
+# Workflow
+
+## Step 1: Data Access
+- Download all `.mzML` files
+- Clone or download the GitHub repository containing FASTA files
+
+---
+
+## Step 2: Protein Identification (Tool-Specific)
+
+Each group must use their assigned software.
+
+⚠️ **Important:**  
+For all tools, the **preferred output level is precursor/PSM-level (or closest equivalent in DIA workflows)**, in addition to protein-level summaries.
+
+---
+
+### Group 1 – OpenMS
+- Workflow:
+  - OpenSwathWorkflow → PyProphet → Protein inference
+- Input:
+  - `.mzML`
+- Recommended outputs:
+  - Feature-level tables (precursor level)
+  - Protein-level results
+- Notes:
+  - Use PyProphet for statistical scoring (1% FDR)
+
+---
+
+### Group 2 – DIA-NN
+- Input:
+  - `.mzML`
+- Mode:
+  - Library-free
+- Recommended outputs:
+  - `report.tsv` (**precursor-level, required**)
+  - `pg_matrix.tsv` (protein-level)
+- Key settings:
+  - FDR: 1% (precursor and protein)
+  - Enable cross-run normalization if needed
+
+---
+
+### Group 3 – Spectronaut
+- Mode:
+  - directDIA
+- Input:
+  - `.mzML`
+- Recommended outputs:
+  - Precursor-level report (**preferred**)
+  - Protein report
+- Notes:
+  - Apply Q-value filtering (1%)
+  - Export long-format tables when possible
+
+---
+
+### Group 4 – MaxDIA (MaxQuant)
+- Workflow:
+  - MaxDIA within MaxQuant
+- Input:
+  - `.mzML`
+- Recommended outputs:
+  - `evidence.txt` (**closest to PSM/precursor-level, required**)
+  - `proteinGroups.txt`
+- Notes:
+  - Ensure correct FASTA parsing selection
+  - FDR set to 1%
+
+---
+
+# Step 3: SDRF Annotation (Mandatory)
+
+Each group must prepare an SDRF (Sample and Data Relationship Format) file describing the experimental design.
+
+- Use a software-generated template if available  
+- Otherwise, use:
+  - **lessSDRF app**
+
+---
+
+# SDRF Template (DIA Example)
+
+---
+
+# SDRF Validation Checklist ✅
+
+Before submission to github under your team folder, ensure:
+
+## File Format
+- [ ] File is **tab-separated (.tsv)**
+- [ ] No formatting issues (no merged cells)
+- [ ] Header row is present
+
+## Required Columns
+- [ ] `source name` (unique per sample)
+- [ ] `assay name` (unique per run)
+- [ ] `comment[data file]` matches `.mzML` file names exactly
+
+## Metadata Completeness
+- [ ] Organism specified (e.g., Homo sapiens)
+- [ ] Biological condition included (treatment/disease)
+- [ ] Replicates clearly defined
+
+## Consistency Checks
+- [ ] No duplicate assay names
+- [ ] File names exactly match shared `.mzML` files
+- [ ] Consistent naming conventions
+
+## Experimental Design
+- [ ] Control vs treatment clearly defined
+- [ ] Time points annotated (6h and 24h)
+- [ ] Drug combinations clearly labeled
+
+## Common Mistakes to Avoid
+- ❌ Using spaces instead of tabs  
+- ❌ Mismatched file names (e.g., `.raw` vs `.mzML`)  
+- ❌ Missing replicate information  
+- ❌ Inconsistent sample naming  
+
+---
+
+# Data Submission (Mandatory)
+
+## Identification Results
+- Upload via:
+  - https://filesender.funet.fi/
+- Share with the teaching team
+
+⚠️ Include:
+- **Precursor/PSM-level output (required)**
+- Protein-level summary (recommended)
+- Please add your team number and software name for every file that you will share from your team:
+  - TeamN_SOFTWARE_FILENAME
+  - for example: Team4_MaxDIA_evidence.txt
+
+---
+
+## SDRF File
+- Upload to:
+  - Your group-specific folder in GitHub
+
+---
+
+# Optional Analysis
+
+## Statistical Analysis
+You may perform:
+- Differential expression
+- PCA / clustering
+- Pathway or enrichment analysis
+
+## Submission
+- Upload results to:
+  - Your **team folder only**
+- Do NOT upload to the root directory
+
+---
+
+# Folder Structure
+
+```text
+project-root/
+├── team-1_openms/
+│   ├── Team1_OpenMS_SDRF.tsv
+│   ├── Team1_OpenMS_results.tsv
+│   ├── Team1_OpenMS_parameters.txt
+│   └── ...
+├── team-2_diann/
+│   ├── Team2_DIA-NN_SDRF.tsv
+│   ├── Team2_DIA-NN_report.tsv
+│   ├── Team2_DIA-NN_pg_matrix.tsv
+│   └── ...
+```
+---
+
